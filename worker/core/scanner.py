@@ -1,6 +1,13 @@
-"""Scenario folder scan — reports local .rks files to the cloud library."""
+"""Scenario folder scan — reports local .rks files to the cloud library.
+
+Default scan targets the OneDrive Scenarios folder (names only — path
+resolved per PC at runtime). A custom-folder scan stores each file's full
+path on the scenario row; a literal {USERNAME} in the given path is kept
+in the stored path so it still resolves per-PC at run time.
+"""
 import logging
 import os
+import re
 from pathlib import Path
 
 from .cloud import Cloud
@@ -8,14 +15,26 @@ from .cloud import Cloud
 log = logging.getLogger("worker")
 
 
-def scan(cloud: Cloud, cfg) -> dict:
-    folder = cfg.resolved_scenarios_folder()
-    if not os.path.isdir(folder):
-        msg = f"Folder not found on {cfg.username}: {folder}"
-        log.error("Scan error: %s", msg)
-        return {"error": msg, "found": [], "total": 0}
+def _resolve_username(path: str, username: str) -> str:
+    return re.sub(r"(?i)\{\s*username\s*\}", username, path)
 
-    names = sorted((p.stem for p in Path(folder).glob("*.rks")), key=str.lower)
-    cloud.upsert_scenarios(names)
-    log.info("Scan: %d scenario(s) reported", len(names))
-    return {"error": None, "found": names, "total": len(names)}
+
+def scan(cloud: Cloud, cfg, folder: str | None = None) -> dict:
+    raw = (folder or cfg.scenarios_folder).strip().rstrip("\\/")
+    resolved = _resolve_username(raw, cfg.username)
+
+    if not os.path.isdir(resolved):
+        msg = f"Folder not found on {cfg.username}: {resolved}"
+        log.error("Scan error: %s", msg)
+        return {"error": msg, "found": [], "total": 0, "folder": resolved}
+
+    names = sorted((p.stem for p in Path(resolved).glob("*.rks")), key=str.lower)
+    if folder:
+        # Custom folder → store full path per scenario (placeholder preserved)
+        rows = [{"name": n, "path": os.path.join(raw, n + ".rks")} for n in names]
+    else:
+        rows = [{"name": n} for n in names]
+
+    cloud.upsert_scenarios(rows)
+    log.info("Scan: %d scenario(s) reported from %s", len(names), resolved)
+    return {"error": None, "found": names, "total": len(names), "folder": resolved}

@@ -76,7 +76,8 @@ class CommandHandler:
                 self.cloud.finish_command(cmd["id"], True)
 
             elif ctype == "scan":
-                result = scanner.scan(self.cloud, self.cfg)
+                result = scanner.scan(self.cloud, self.cfg,
+                                      folder=payload.get("folder") or None)
                 self.cloud.finish_command(cmd["id"], result["error"] is None, result)
 
             elif ctype == "shutdown":

@@ -180,13 +180,19 @@ class Cloud:
         return bool(res and res.data)
 
     # ── scenarios ───────────────────────────────────────────
-    def upsert_scenarios(self, names: list[str]):
+    def upsert_scenarios(self, entries: list[dict]):
+        """entries: [{name, path?}] — rows without 'path' leave any existing
+        custom path untouched (PostgREST only updates supplied columns)."""
         now = utcnow()
-        rows = [{"name": n, "reported_by": self.cfg.worker_id, "last_seen_at": now}
-                for n in names]
-        if rows:
+        plain  = [e for e in entries if "path" not in e]
+        pathed = [e for e in entries if "path" in e]
+        for batch in (plain, pathed):
+            if not batch:
+                continue
+            rows = [{**e, "reported_by": self.cfg.worker_id, "last_seen_at": now}
+                    for e in batch]
             self._safe(
-                lambda: self.client.table("scenarios")
+                lambda rows=rows: self.client.table("scenarios")
                     .upsert(rows, on_conflict="name").execute(),
                 "upsert_scenarios",
             )
