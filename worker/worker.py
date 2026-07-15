@@ -52,6 +52,19 @@ def _setup_logging(to_file: bool):
             pass
 
 
+def _hide_console():
+    """Hide our console window in --background mode (exe is a console build
+    so the first-run pairing prompt works; background runs go invisible)."""
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+        except Exception:
+            pass
+
+
 def _set_console_title():
     if platform.system() == "Windows":
         try:
@@ -126,6 +139,7 @@ def main():
 
     # ── Background mode (Task Scheduler / relaunch) ─────────
     if args.background:
+        _hide_console()
         _setup_logging(to_file=True)
         if not cfg:
             log.error("No config found — run the installer first (double-click the exe)")

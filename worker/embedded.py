@@ -6,5 +6,5 @@ The anon key is safe to embed — RLS is the security boundary.
 """
 import os
 
-SUPABASE_URL      = os.environ.get("ORCHARD_SUPABASE_URL",      "https://YOUR-PROJECT.supabase.co")
-SUPABASE_ANON_KEY = os.environ.get("ORCHARD_SUPABASE_ANON_KEY", "YOUR-ANON-KEY")
+SUPABASE_URL      = os.environ.get("ORCHARD_SUPABASE_URL",      "https://luuxmkhjoxqdzgjyerbc.supabase.co")
+SUPABASE_ANON_KEY = os.environ.get("ORCHARD_SUPABASE_ANON_KEY", "sb_publishable_xCofdWrVHGYRtrvx1iK1GQ_qAwfRKNB")
