@@ -444,6 +444,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
         <span class="text-green-600 font-mono">0</span> → <span class="text-green-600">success</span>.
         Any non-zero → <span class="text-red-600">failed</span>. Full stdout/stderr is captured below (live while running).
       </div>
+      <div id="log-task-info" class="hidden mb-2 flex flex-wrap gap-4 text-xs text-gray-600 bg-blue-50 border border-blue-100 rounded px-4 py-2"></div>
       <pre id="log-output" class="bg-gray-900 rounded p-4 text-xs text-green-400 font-mono max-h-[34rem] overflow-auto whitespace-pre-wrap">Select a task above to view its output…</pre>
     </div>
   </div>
@@ -596,6 +597,13 @@ async function startApp() {
   // Belt-and-braces: recompute online window + catch missed events
   setInterval(async () => { await fetchAll(); renderAll(); }, 15_000);
   setInterval(renderAll, 5_000); // re-render for the 30 s online cutoff
+  // live ⏱ ticker for running tasks (cheap — keyed DOM diffing)
+  setInterval(() => {
+    if (G.tasks.some(t => t.status === 'running')) {
+      diffTasks(); diffPCCards();
+      if (activeTab === 'logs') renderLogView();
+    }
+  }, 1_000);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -606,6 +614,22 @@ function firstOnlineWorker() { return G.workers.find(isOnline) || G.workers[0] |
 function workerById(id) { return G.workers.find(w => w.id === id); }
 function workerName(id) { const w = workerById(id); return w ? (w.display_name || w.username) : '—'; }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function fmtDur(ms) {
+  if (ms == null || isNaN(ms) || ms < 0) return '';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60), sec = s % 60;
+  if (m < 60) return `${m}m ${String(sec).padStart(2, '0')}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${String(m % 60).padStart(2, '0')}m`;
+}
+
+function taskElapsed(t) {
+  if (!t.started_at) return '';
+  const end = t.finished_at ? new Date(t.finished_at) : new Date();
+  return fmtDur(end - new Date(t.started_at));
+}
 
 const SCFG = {
   pending: { icon:'⏳', bg:'bg-yellow-50', text:'text-yellow-700', border:'border-yellow-200' },
@@ -654,7 +678,7 @@ function diffPCCards() {
     const isRunning = runningTask || (online && w.rk_running);
     const borderC = isRunning ? '#0078d4' : online ? '#d1d5db' : '#e5e7eb';
     const dot = isRunning ? 'bg-blue-500 spin' : online ? 'bg-green-500 pulse-dot' : 'bg-gray-300';
-    const label = runningTask ? runningTask.scenario_name
+    const label = runningTask ? `${runningTask.scenario_name} · ⏱ ${taskElapsed(runningTask)}`
                 : (online && w.rk_running) ? `▶ ${w.rk_scenario || 'Scenario'} (started on PC)`
                 : online ? (w.enabled ? (w.rk_open ? 'Idle — Keyence open' : 'Idle') : 'Disabled')
                 : 'Offline';
@@ -728,8 +752,8 @@ function diffTasks() {
         ? `<svg class="w-4 h-4 spin text-blue-400" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="30 70" stroke-linecap="round"/></svg>`
         : cfg.icon;
       const dt = t.created_at ? new Date(t.created_at).toLocaleString() : '';
-      const dur = t.started_at && t.finished_at
-        ? ((new Date(t.finished_at) - new Date(t.started_at)) / 1000).toFixed(1) + 's' : '';
+      const dur = t.status === 'running'
+        ? `⏱ ${taskElapsed(t)}` : (taskElapsed(t) ? '⏱ ' + taskElapsed(t) : '');
       const exitBadge = (t.exit_code != null && t.status !== 'running')
         ? `<span class="text-xs font-mono ${t.exit_code === 0 ? 'text-green-600' : 'text-red-600'}">exit&nbsp;${t.exit_code}</span>` : '';
       const stop = ['running','pending'].includes(t.status)
@@ -1285,7 +1309,25 @@ async function loadLogsForSelected() {
 
 function renderLogView() {
   const out = document.getElementById('log-output');
-  if (!logTaskId) { out.textContent = 'Select a task above to view its output…'; return; }
+  const info = document.getElementById('log-task-info');
+  if (!logTaskId) {
+    out.textContent = 'Select a task above to view its output…';
+    info.classList.add('hidden');
+    return;
+  }
+  const t = G.tasks.find(x => x.id === logTaskId);
+  if (t) {
+    const cfg = SCFG[t.status] || SCFG.pending;
+    info.innerHTML = `
+      <span><strong class="text-gray-700">Status:</strong> <span class="${cfg.text}">${t.status}</span></span>
+      <span><strong class="text-gray-700">Started:</strong> ${t.started_at ? new Date(t.started_at).toLocaleString() : '—'}</span>
+      <span><strong class="text-gray-700">${t.status === 'running' ? 'Running for' : 'Duration'}:</strong> ⏱ ${taskElapsed(t) || '—'}</span>
+      ${t.exit_code != null ? `<span><strong class="text-gray-700">Exit:</strong> <span class="font-mono ${t.exit_code === 0 ? 'text-green-600' : 'text-red-600'}">${t.exit_code}</span></span>` : ''}
+      <span><strong class="text-gray-700">PC:</strong> ${esc(workerName(t.worker_id))}</span>`;
+    info.classList.remove('hidden');
+  } else {
+    info.classList.add('hidden');
+  }
   const text = logLines.length ? logLines.join('\n') : 'No logs yet.';
   if (out._last !== text) { out.textContent = text; out.scrollTop = out.scrollHeight; out._last = text; }
 }
