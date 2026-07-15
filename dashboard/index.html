@@ -77,8 +77,16 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
 <!-- ═══ APP ═══ -->
 <div id="app" class="hidden">
 
+  <!-- Mobile top bar -->
+  <div class="md:hidden fixed top-0 inset-x-0 z-30 bg-gray-900 flex items-center gap-3 px-4 py-3 shadow">
+    <button onclick="toggleSidebar()" class="text-gray-300 text-2xl leading-none px-1 cursor-pointer">☰</button>
+    <span class="w-7 h-7 rounded-lg flex items-center justify-center text-sm" style="background:linear-gradient(135deg,#0d8ee9,#005a9e)">🤖</span>
+    <span class="text-white font-semibold text-sm">RPA Orchestrator</span>
+  </div>
+  <div id="sidebar-backdrop" class="hidden fixed inset-0 bg-black/50 z-30 md:hidden" onclick="toggleSidebar(false)"></div>
+
   <!-- Sidebar -->
-  <aside class="fixed inset-y-0 left-0 w-60 bg-gray-900 flex flex-col z-40">
+  <aside id="sidebar" class="fixed inset-y-0 left-0 w-60 bg-gray-900 flex flex-col z-40 transform -translate-x-full md:translate-x-0 transition-transform duration-200">
     <div class="flex items-center gap-3 px-5 py-5 border-b border-gray-800">
       <span class="w-9 h-9 rounded-lg flex items-center justify-center text-lg" style="background:linear-gradient(135deg,#0d8ee9,#005a9e)">🤖</span>
       <div>
@@ -114,7 +122,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
   </aside>
 
   <!-- Main -->
-  <div class="ml-60 px-8 py-7 max-w-6xl">
+  <div class="md:ml-60 px-4 md:px-8 pt-16 md:pt-7 pb-7 max-w-6xl">
   <h1 id="page-title" class="text-xl font-semibold tracking-tight text-gray-900 mb-5">Dashboard</h1>
 
   <!-- ═══ DASHBOARD ═══ -->
@@ -774,7 +782,7 @@ function diffTasks() {
       const retry = ['success','failed','stopped'].includes(t.status)
         ? `<button onclick="retryTask('${t.id}')" class="text-xs text-orange-600 border border-orange-200 bg-orange-50 hover:bg-orange-100 px-3 py-1 rounded cursor-pointer">Retry</button>` : '';
       items.push({ key: t.id, html: `
-        <div class="flex items-center gap-4 px-5 py-2.5 hover:bg-gray-50 transition-colors">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-5 py-2.5 hover:bg-gray-50 transition-colors">
           <div class="w-5 flex-shrink-0 text-center text-sm">${ico}</div>
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium truncate text-gray-900">${esc(t.scenario_name)}
@@ -814,7 +822,7 @@ function diffScenarios() {
       ? `<span class="text-blue-600">${esc(s.path)}</span>`
       : `C:\\Users\\<span class="text-blue-600">{USERNAME}</span>\\Orchard Medical Management\\Automations-PatriotPay - Documents\\Scenarios\\<span class="text-green-600">${esc(s.name)}.rks</span>`;
     return { key: s.id, html: `
-      <div class="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors group">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-5 py-3 hover:bg-gray-50 transition-colors group">
         <div class="w-7 h-7 rounded bg-blue-50 flex items-center justify-center flex-shrink-0 text-sm border border-blue-100">📄</div>
         <div class="flex-1 min-w-0">
           <p class="text-sm font-medium text-gray-900">${esc(s.name)} ${!G.myCompany && !G.viewCompany ? coBadge(s.company) : ''}</p>
@@ -822,7 +830,7 @@ function diffScenarios() {
         </div>
         ${lastBadge}
         <span class="text-xs text-gray-400">${runs} run${runs !== 1 ? 's' : ''}</span>
-        <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div class="flex gap-2 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
           <button onclick="quickRun('${s.id}')" class="btn-primary text-xs px-3 py-1">Run</button>
           <button onclick="removeScenario('${s.id}')" class="text-xs text-red-500 hover:text-red-700 px-2 py-1 cursor-pointer">Remove</button>
         </div>
@@ -994,7 +1002,7 @@ function renderWinTasks() {
     const collapsed = collapsedWinPcs.has(w.id);
     const synced = rows.length ? new Date(Math.max(...rows.map(r => new Date(r.updated_at)))).toLocaleString() : null;
     items.push({ key: 'pc-' + w.id, html: `
-      <div class="flex items-center gap-3 px-5 py-2.5 bg-gray-50 border-y border-gray-100">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 md:px-5 py-2.5 bg-gray-50 border-y border-gray-100">
         <span onclick="toggleWinPc('${w.id}')" class="cursor-pointer text-xs text-gray-500 select-none">${collapsed ? '▶' : '▼'}</span>
         <span class="w-2 h-2 rounded-full flex-shrink-0 ${online ? 'bg-green-500 pulse-dot' : 'bg-gray-300'}"></span>
         <span onclick="toggleWinPc('${w.id}')" class="text-sm font-semibold text-gray-800 cursor-pointer select-none">${esc(w.display_name || w.username)}</span>
@@ -1010,7 +1018,7 @@ function renderWinTasks() {
     }
     for (const t of rows) {
       items.push({ key: t.id, html: `
-        <div class="flex items-center gap-4 px-5 py-2.5 hover:bg-gray-50 transition-colors">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-5 py-2.5 hover:bg-gray-50 transition-colors">
           <div class="w-5 flex-shrink-0 text-center text-sm">${t.is_ours ? '🤖' : '🪟'}</div>
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium truncate text-gray-900">${esc(t.task_name)}</p>
@@ -1141,7 +1149,7 @@ function diffSettings() {
         ${G.companies.map(c => `<option value="${esc(c.slug)}" ${w.company === c.slug ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
       </select>`;
     return { key: w.id, html: `
-      <div class="flex items-center gap-4 bg-gray-50 border border-gray-200 rounded px-4 py-3">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2 bg-gray-50 border border-gray-200 rounded px-4 py-3">
         <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 ${online ? 'bg-green-500 pulse-dot' : 'bg-gray-300'}"></span>
         <div class="flex-1 min-w-0">
           <p class="text-sm font-medium text-gray-900">${esc(w.display_name || w.username)} ${coCtl}</p>
@@ -1171,7 +1179,7 @@ function diffSchedules() {
     const days = (s.days || []).map(d => DAY_NAMES[d]).join(', ') || 'No days';
     const last = s.last_fired_at ? new Date(s.last_fired_at).toLocaleString() : 'Never';
     return { key: s.id, html: `
-      <div class="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-5 py-3 hover:bg-gray-50 transition-colors">
         <div class="flex-1 min-w-0">
           <p class="text-sm font-medium text-gray-900">${esc(s.name)}
             <span class="ml-1 text-xs font-normal ${s.kind === 'scenario' ? 'text-purple-600' : 'text-blue-600'}">${s.kind === 'scenario' ? `▶ ${esc(s.scenario_name || '?')} on ${esc(s.worker_id ? workerName(s.worker_id) : 'first online PC')}` : '▶▶ Run All'}</span></p>
@@ -1616,9 +1624,18 @@ async function deleteSched(id) {
 // ═══════════════════════════════════════════════════════════
 //  Tabs
 // ═══════════════════════════════════════════════════════════
+function toggleSidebar(force) {
+  const side = document.getElementById('sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  const open = force !== undefined ? force : side.classList.contains('-translate-x-full');
+  side.classList.toggle('-translate-x-full', !open);
+  backdrop.classList.toggle('hidden', !open);
+}
+
 const PAGE_TITLES = { dashboard:'Dashboard', scenarios:'Scenario Library',
                       schedules:'Schedules', settings:'Settings', logs:'Task Logs' };
 function tab(name) {
+  if (window.innerWidth < 768) toggleSidebar(false);
   activeTab = name;
   ['dashboard','scenarios','schedules','settings','logs'].forEach(t => {
     document.getElementById('view-' + t).classList.toggle('hidden', t !== name);
