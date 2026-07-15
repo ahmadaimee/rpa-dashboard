@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Orchard RPA — Control Room</title>
+<title>RPA-Bot — Control Room</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="config.js"></script>
@@ -52,7 +52,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
 <!-- ═══ LOGIN ═══ -->
 <div id="login-view" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-[#f3f3f3]">
   <div class="card p-8 w-full max-w-sm">
-    <h1 class="text-xl font-semibold text-gray-900 mb-1">⚙️ Orchard RPA</h1>
+    <h1 class="text-xl font-semibold text-gray-900 mb-1">⚙️ RPA-Bot</h1>
     <p class="text-gray-500 text-sm mb-6">Sign in to the control room</p>
     <form onsubmit="doLogin(event)">
       <label class="block text-xs text-gray-500 mb-1">Email</label>
@@ -71,7 +71,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
   <!-- Header -->
   <div class="flex items-center justify-between mb-6">
     <div>
-      <h1 class="text-2xl font-semibold tracking-tight text-gray-900">⚙️ Orchard RPA</h1>
+      <h1 class="text-2xl font-semibold tracking-tight text-gray-900">⚙️ RPA-Bot</h1>
       <p class="text-gray-500 text-sm mt-0.5">RK-Keyence Automation Control Room — Cloud</p>
     </div>
     <div class="flex items-center gap-4">
@@ -237,12 +237,27 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
   <!-- ═══ SCHEDULES ═══ -->
   <div id="view-schedules" class="hidden">
     <div class="card p-5 mb-4">
-      <h2 class="text-base font-semibold text-gray-900 mb-1">➕ New Schedule</h2>
-      <p class="text-xs text-gray-500 mb-4">Each schedule triggers <strong class="text-gray-700">Run All</strong> at the given time — evaluated in the cloud, works even when this dashboard is closed.</p>
+      <h2 class="text-base font-semibold text-gray-900 mb-1">➕ New Cloud Schedule</h2>
+      <p class="text-xs text-gray-500 mb-4">Evaluated in the cloud — works even when this dashboard is closed, and needs no Windows permissions on the PC. Choose <strong class="text-gray-700">Run All</strong> or a <strong class="text-gray-700">single scenario on a specific PC</strong>.</p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="md:col-span-2">
+        <div>
           <label class="block text-xs text-gray-500 mb-1">Schedule Name</label>
           <input id="sched-name" type="text" placeholder="e.g. Nightly Run" class="w-full px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Type</label>
+          <select id="cs-kind" onchange="csKindChanged()" class="w-full px-3 py-2 text-sm">
+            <option value="run_all">Run All (round-robin across online PCs)</option>
+            <option value="scenario">Single scenario on a PC</option>
+          </select>
+        </div>
+        <div id="cs-scenario-row" class="hidden">
+          <label class="block text-xs text-gray-500 mb-1">Scenario</label>
+          <select id="cs-scenario" class="w-full px-3 py-2 text-sm"></select>
+        </div>
+        <div id="cs-pc-row" class="hidden">
+          <label class="block text-xs text-gray-500 mb-1">Run on PC <span class="text-gray-400 font-normal">(optional — first online if empty)</span></label>
+          <select id="cs-pc" class="w-full px-3 py-2 text-sm"></select>
         </div>
         <div class="md:col-span-2">
           <label class="block text-xs text-gray-500 mb-2">Days of Week</label>
@@ -280,7 +295,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
       </div>
       <p class="text-xs text-gray-500 mb-4">
         Creates a <strong class="text-gray-700">real Windows scheduled task</strong> on the selected PC. At the set time, Windows runs
-        <code class="text-gray-700">OrchardRPAWorker.exe --enqueue</code>, which drops the scenario into this PC's normal queue —
+        <code class="text-gray-700">RPA-Bot.exe --enqueue</code>, which drops the scenario into this PC's normal queue —
         so status and live logs still show up here. Below you also see the PC's other (non-Microsoft) scheduled tasks, read-only.
       </p>
 
@@ -310,7 +325,8 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
           <input id="win-time" type="time" value="00:00" class="w-full px-3 py-2 text-sm">
         </div>
       </div>
-      <button onclick="winSchedCreate()" class="btn-primary">Create Windows Task</button>
+      <button id="win-create-btn" onclick="winSchedCreate()" class="btn-primary">Create Windows Task</button>
+      <button id="win-cancel-edit" onclick="winCancelEdit()" class="hidden ml-2 text-xs text-gray-400 hover:text-gray-600 cursor-pointer">Cancel edit</button>
       <span id="win-sched-status" class="ml-3 text-xs text-gray-500"></span>
     </div>
 
@@ -331,7 +347,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
     <div class="card p-5 mb-4">
       <h2 class="text-base font-semibold text-gray-900 mb-1">🔑 Pair a New Worker PC</h2>
       <p class="text-xs text-gray-500 mb-3">
-        Generate a one-time pairing code, then run <code class="text-blue-600">OrchardRPAWorker.exe</code> on the new PC and enter the code when prompted. Codes expire after 24 hours.
+        Generate a one-time pairing code, then run <code class="text-blue-600">RPA-Bot.exe</code> on the new PC and enter the code when prompted. Codes expire after 24 hours.
       </p>
       <div class="flex items-center gap-3 flex-wrap">
         <button onclick="generateCode()" class="btn-primary">Generate Pairing Code</button>
@@ -343,7 +359,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
     <div class="card p-5 mb-4" style="border-left:3px solid #9333ea;">
       <h2 class="text-base font-semibold text-gray-900 mb-1">⬆️ Worker App Updates</h2>
       <p class="text-xs text-gray-500 mb-3">
-        Publish a new <code class="text-gray-700">OrchardRPAWorker.exe</code> — every worker checks
+        Publish a new <code class="text-gray-700">RPA-Bot.exe</code> — every worker checks
         shortly after start and every ~30 minutes, verifies the file hash, and updates itself automatically
         (never mid-scenario). Use a worker's <strong>Update</strong> button below to force it immediately.
       </p>
@@ -354,7 +370,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
           <input id="rel-version" type="text" placeholder="1.2.0" class="w-full px-3 py-2 text-sm font-mono">
         </div>
         <div class="flex-1 min-w-[220px]">
-          <label class="block text-xs text-gray-500 mb-1">OrchardRPAWorker.exe</label>
+          <label class="block text-xs text-gray-500 mb-1">RPA-Bot.exe</label>
           <input id="rel-file" type="file" accept=".exe" class="w-full text-sm text-gray-500">
         </div>
         <button id="rel-btn" onclick="publishRelease()" class="btn-primary">Publish Release</button>
@@ -558,7 +574,7 @@ function diffPCCards() {
   if (!G.workers.length) {
     grid.innerHTML = `<div class="col-span-3 text-center py-10 text-gray-400 text-sm">
       No workers yet. Go to <strong class="text-gray-600">Settings</strong>, generate a pairing code, and run
-      <code class="text-gray-600">OrchardRPAWorker.exe</code> on each PC.</div>`;
+      <code class="text-gray-600">RPA-Bot.exe</code> on each PC.</div>`;
     return;
   }
   diffList(grid, G.workers.map(w => {
@@ -765,6 +781,17 @@ function refreshSelects() {
   if (winScen._last !== scenOpts) { const v = winScen.value; winScen.innerHTML = scenOpts; winScen._last = scenOpts; if (v) winScen.value = v; }
   const custPc = document.getElementById('cust-pc');
   if (custPc._last !== pcOpts) { const v = custPc.value; custPc.innerHTML = pcOpts; custPc._last = pcOpts; if (v) custPc.value = v; }
+  const csPcOpts = '<option value="">— First online PC —</option>' + pcOpts;
+  const csPc = document.getElementById('cs-pc');
+  if (csPc._last !== csPcOpts) { const v = csPc.value; csPc.innerHTML = csPcOpts; csPc._last = csPcOpts; if (v) csPc.value = v; }
+  const csScen = document.getElementById('cs-scenario');
+  if (csScen._last !== scenOpts) { const v = csScen.value; csScen.innerHTML = scenOpts; csScen._last = scenOpts; if (v) csScen.value = v; }
+}
+
+function csKindChanged() {
+  const isScenario = document.getElementById('cs-kind').value === 'scenario';
+  document.getElementById('cs-scenario-row').classList.toggle('hidden', !isScenario);
+  document.getElementById('cs-pc-row').classList.toggle('hidden', !isScenario);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -875,9 +902,12 @@ function renderWinTasks() {
             <p class="text-xs text-gray-400 truncate">${esc(t.schedule || '')}${t.task_to_run ? ' · ' + esc(t.task_to_run) : ''}</p>
             <p class="text-xs text-gray-400 mt-0.5">Next: ${esc(t.next_run || '—')} · Last: ${esc(t.last_run || 'never')}${t.last_result ? ' (result ' + esc(t.last_result) + ')' : ''}</p>
           </div>
-          <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded border ${t.status === 'Running' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-500 border-gray-200'}">${esc(t.status || '?')}</span>
-          ${t.is_ours ? `<button onclick="winSchedDeleteFor('${w.id}','${esc(t.task_name)}')" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0 cursor-pointer">Delete</button>`
-                      : '<span class="text-xs text-gray-300 flex-shrink-0">read-only</span>'}
+          <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded border ${t.status === 'Running' ? 'bg-blue-50 text-blue-700 border-blue-200' : t.status === 'Disabled' ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-gray-50 text-gray-500 border-gray-200'}">${esc(t.status || '?')}</span>
+          ${t.is_ours ? `<div class="flex gap-2 flex-shrink-0">
+            <button onclick="winSchedToggle('${w.id}','${esc(t.task_name)}', ${t.status === 'Disabled'})" class="text-xs px-2 py-1 rounded border cursor-pointer ${t.status === 'Disabled' ? 'text-green-600 border-green-200 bg-green-50' : 'text-orange-600 border-orange-200 bg-orange-50'}">${t.status === 'Disabled' ? 'Enable' : 'Disable'}</button>
+            <button onclick="winSchedEdit('${w.id}','${esc(t.task_name)}')" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 px-2 py-1 rounded cursor-pointer">Edit</button>
+            <button onclick="winSchedDeleteFor('${w.id}','${esc(t.task_name)}')" class="text-xs text-red-500 hover:text-red-700 px-1 cursor-pointer">Delete</button>
+          </div>` : '<span class="text-xs text-gray-300 flex-shrink-0">read-only</span>'}
         </div>` });
     }
   }
@@ -932,6 +962,8 @@ async function winSchedDeleteFor(workerId, taskName) {
   await _winCommandFor(workerId, 'win_sched_delete', { task_name: taskName });
 }
 
+let winEditing = null;  // { workerId, taskName } while editing an existing task
+
 async function winSchedCreate() {
   const name = document.getElementById('win-name').value.trim();
   const scenId = document.getElementById('win-scenario').value;
@@ -942,9 +974,35 @@ async function winSchedCreate() {
   if (!days.length) return alert('Select at least one day.');
   if (!time) return alert('Set a time.');
   const sc = G.scenarios.find(s => s.id === scenId);
-  await _winCommand('win_sched_create', { name, scenario: sc.name, days, time });
+  if (winEditing) {
+    await _winCommandFor(winEditing.workerId, 'win_sched_update',
+      { task_name: winEditing.taskName, name, scenario: sc.name, days, time });
+    winCancelEdit();
+  } else {
+    await _winCommand('win_sched_create', { name, scenario: sc.name, days, time });
+  }
   document.getElementById('win-name').value = '';
   document.querySelectorAll('.win-day').forEach(cb => cb.checked = false);
+}
+
+function winSchedEdit(workerId, taskName) {
+  winEditing = { workerId, taskName };
+  document.getElementById('win-sel-pc').value = workerId;
+  document.getElementById('win-name').value =
+    taskName.replace(/^\\?RPA-Bot-Sched-/, '').replace(/^\\?OrchardRPA-/, '');
+  document.getElementById('win-create-btn').textContent = `Update "${taskName.replace(/^\\/, '')}"`;
+  document.getElementById('win-cancel-edit').classList.remove('hidden');
+  document.getElementById('win-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function winCancelEdit() {
+  winEditing = null;
+  document.getElementById('win-create-btn').textContent = 'Create Windows Task';
+  document.getElementById('win-cancel-edit').classList.add('hidden');
+}
+
+async function winSchedToggle(workerId, taskName, enable) {
+  await _winCommandFor(workerId, 'win_sched_toggle', { task_name: taskName, enable });
 }
 
 async function winSchedDelete(taskName) {
@@ -993,7 +1051,8 @@ function diffSchedules() {
     return { key: s.id, html: `
       <div class="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors">
         <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-gray-900">${esc(s.name)}</p>
+          <p class="text-sm font-medium text-gray-900">${esc(s.name)}
+            <span class="ml-1 text-xs font-normal ${s.kind === 'scenario' ? 'text-purple-600' : 'text-blue-600'}">${s.kind === 'scenario' ? `▶ ${esc(s.scenario_name || '?')} on ${esc(s.worker_id ? workerName(s.worker_id) : 'first online PC')}` : '▶▶ Run All'}</span></p>
           <p class="text-xs text-gray-500 mt-0.5">${days} at <span class="font-mono text-blue-600">${String(s.run_time).slice(0,5)}</span> <span class="text-gray-400">(${esc(s.timezone)})</span></p>
           <p class="text-xs text-gray-400 mt-0.5">Last run: ${last}${s.last_count != null ? ` · ${s.last_count} task(s)` : ''}</p>
         </div>
@@ -1032,7 +1091,7 @@ async function publishRelease() {
   const status = document.getElementById('rel-status');
   const btn = document.getElementById('rel-btn');
   if (!/^\d+\.\d+(\.\d+)?$/.test(version)) return alert('Enter a version like 1.2.0');
-  if (!file) return alert('Choose the OrchardRPAWorker.exe file.');
+  if (!file) return alert('Choose the RPA-Bot.exe file.');
   if (G.latestRelease && !verLess(G.latestRelease.version, version))
     return alert(`Version must be higher than the latest (${G.latestRelease.version}).`);
   if (!confirm(`Publish v${version}? All workers will self-update within ~30 minutes.`)) return;
@@ -1045,7 +1104,7 @@ async function publishRelease() {
     const buf = await file.arrayBuffer();
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))]
       .map(b => b.toString(16).padStart(2, '0')).join('');
-    const path = `releases/${version}/OrchardRPAWorker.exe`;
+    const path = `releases/${version}/RPA-Bot.exe`;
     status.textContent = `⏳ Uploading ${(file.size / 1048576).toFixed(1)} MB…`;
     const { error: upErr } = await sb.storage.from('worker-releases')
       .upload(path, buf, { upsert: true, contentType: 'application/octet-stream' });
@@ -1306,12 +1365,18 @@ async function addSchedule() {
   const name = document.getElementById('sched-name').value.trim();
   const time = document.getElementById('sched-time').value;
   const days = [...document.querySelectorAll('.sched-day:checked')].map(cb => parseInt(cb.value));
+  const kind = document.getElementById('cs-kind').value;
   if (!name) return alert('Enter a schedule name.');
   if (!days.length) return alert('Select at least one day of the week.');
   if (!time) return alert('Set a time.');
-  if (await act(sb.from('schedules').insert({
-    name, kind: 'run_all', days, run_time: time, timezone: TZ, enabled: true,
-  }))) {
+  const row = { name, kind, days, run_time: time, timezone: TZ, enabled: true };
+  if (kind === 'scenario') {
+    const scenId = document.getElementById('cs-scenario').value;
+    if (!scenId) return alert('Select a scenario.');
+    row.scenario_name = G.scenarios.find(s => s.id === scenId).name;
+    row.worker_id = document.getElementById('cs-pc').value || null;
+  }
+  if (await act(sb.from('schedules').insert(row))) {
     document.getElementById('sched-name').value = '';
     document.getElementById('sched-time').value = '00:00';
     document.querySelectorAll('.sched-day').forEach(cb => cb.checked = false);

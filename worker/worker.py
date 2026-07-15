@@ -1,13 +1,14 @@
 """
-Orchard RPA Worker — cloud edition
-==================================
+RPA-Bot Worker — cloud edition
+==============================
 
 First run (double-click the exe): asks for a pairing code, registers with
-Supabase, installs a Task Scheduler logon task, and starts hidden.
+Supabase, installs a Task Scheduler logon task, and starts hidden with a
+system-tray icon (Open Dashboard / Exit).
 
-    OrchardRPAWorker.exe                first-run setup / "already running" notice
-    OrchardRPAWorker.exe --background   the hidden worker loop (set by Task Scheduler)
-    OrchardRPAWorker.exe --uninstall    remove autostart + stop the worker
+    RPA-Bot.exe                first-run setup / start-or-re-register menu
+    RPA-Bot.exe --background   the hidden worker loop (set by Task Scheduler)
+    RPA-Bot.exe --uninstall    remove autostart + stop + clear registration
 
 Success/Failed: RkScenarioManager.exe /RUN exits 0 → success, non-zero →
 failed. Full stdout is streamed to the cloud task_logs table.
@@ -22,7 +23,7 @@ import time
 from version import __version__
 import embedded
 from core import config as cfgmod
-from core import installer, scanner, heartbeat, updater
+from core import installer, scanner, heartbeat, updater, tray
 from core.cloud import Cloud
 from core.commands import CommandHandler
 from core.runner import Runner
@@ -69,13 +70,13 @@ def _set_console_title():
     if platform.system() == "Windows":
         try:
             import ctypes
-            ctypes.windll.kernel32.SetConsoleTitleW(f"OrchardRPA-Worker [{cfgmod.USERNAME}]")
+            ctypes.windll.kernel32.SetConsoleTitleW(f"RPA-Bot [{cfgmod.USERNAME}]")
         except Exception:
             pass
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Orchard RPA Worker (cloud)")
+    p = argparse.ArgumentParser(description="RPA-Bot Worker (cloud)")
     p.add_argument("--background", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--uninstall", action="store_true", help="Remove autostart and stop the worker")
     p.add_argument("--enqueue", metavar="SCENARIO",
@@ -91,6 +92,7 @@ def worker_loop(cfg: cfgmod.Config):
     cmds = CommandHandler(cloud, cfg, runner)
 
     cloud.set_status("idle")
+    tray.start(cloud, cfg, __version__, embedded.DASHBOARD_URL, runner)
     scanner.scan(cloud, cfg)  # auto-scan on startup
     try:
         from core import winsched
@@ -192,12 +194,33 @@ def main():
         return
 
     if cfg:
-        # Configured but not running — reinstall task and start
-        print("  Existing registration found — starting worker...")
+        print()
+        print("  RPA-Bot — this PC is already registered.")
+        print(f"  Registered as: {cfg.display_name} ({cfg.username})")
+        print()
+        print("  [Enter] Start worker")
+        print("  [R]     Re-register with a new pairing code (clears old registration)")
+        print("  [U]     Uninstall from this PC")
+        choice = input("  Choice: ").strip().lower()
+
+        if choice == "u":
+            installer.uninstall(None)
+            input("  Press Enter to close...")
+            return
+        if choice == "r":
+            print("  Clearing old registration...")
+            installer.clear_registration()
+            print("  ⚠  Old entry: remove this PC's previous row in the dashboard")
+            print("     Settings tab (it will show as permanently offline).")
+            installer.interactive_install(embedded.SUPABASE_URL, embedded.SUPABASE_ANON_KEY, __version__)
+            return
+
+        # Default: start worker
+        print("  Starting worker...")
         installer.install_startup_task()
         installer.relaunch_background()
         time.sleep(3)
-        print("  ✅ Worker started in the background.")
+        print("  ✅ Worker started in the background (check the tray icon).")
         time.sleep(2)
         return
 

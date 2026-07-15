@@ -17,7 +17,7 @@ from .cloud import Cloud, utcnow
 
 log = logging.getLogger("worker")
 
-OURS_PREFIX = "OrchardRPA-"          # our dashboard-created tasks
+OURS_PREFIX = "RPA-Bot-Sched-"       # our dashboard-created tasks
 DAY_CODES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]  # 0=Sun (JS convention)
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
@@ -28,11 +28,20 @@ def _schtasks(args: list[str]) -> subprocess.CompletedProcess:
                           timeout=60, creationflags=CREATE_NO_WINDOW)
 
 
+def _fail(op: str, r: subprocess.CompletedProcess):
+    err = (r.stderr or r.stdout or "").strip()[:200]
+    if "denied" in err.lower():
+        err += (" — Hint: this PC restricts Task Scheduler for this account. "
+                "Run RPA-Bot once as administrator, or use a Cloud Schedule "
+                "(single scenario) instead — it needs no Windows permissions.")
+    raise RuntimeError(f"schtasks {op} failed: {err}")
+
+
 def list_tasks() -> list[dict]:
     """All scheduled tasks except the \\Microsoft\\ tree."""
     r = _schtasks(["/query", "/fo", "csv", "/v"])
     if r.returncode != 0:
-        raise RuntimeError(f"schtasks /query failed: {r.stderr.strip()[:200]}")
+        _fail("/query", r)
 
     tasks: list[dict] = []
     seen: set[str] = set()
@@ -79,19 +88,40 @@ def create_task(name: str, scenario: str, days: list[int], time_hhmm: str) -> st
     r = _schtasks(["/create", "/tn", task_name, "/tr", tr,
                    "/sc", "weekly", "/d", day_list, "/st", time_hhmm, "/f"])
     if r.returncode != 0:
-        raise RuntimeError(f"schtasks /create failed: {r.stderr.strip()[:200]}")
+        _fail("/create", r)
     log.info("Windows task created: %s (%s at %s)", task_name, day_list, time_hhmm)
     return task_name
 
 
+def _guard_ours(task_name: str, verb: str):
+    if not task_name.lstrip("\\").startswith(OURS_PREFIX):
+        raise ValueError(f"Refusing to {verb} non-{OURS_PREFIX} task: {task_name}")
+
+
 def delete_task(task_name: str):
     """Delete one of OUR tasks only — guard against touching system tasks."""
-    if not task_name.lstrip("\\").startswith(OURS_PREFIX):
-        raise ValueError(f"Refusing to delete non-{OURS_PREFIX} task: {task_name}")
+    _guard_ours(task_name, "delete")
     r = _schtasks(["/delete", "/tn", task_name, "/f"])
     if r.returncode != 0:
-        raise RuntimeError(f"schtasks /delete failed: {r.stderr.strip()[:200]}")
+        _fail("/delete", r)
     log.info("Windows task deleted: %s", task_name)
+
+
+def update_task(task_name: str, name: str, scenario: str,
+                days: list[int], time_hhmm: str) -> str:
+    """Replace one of OUR tasks with new settings (delete + recreate)."""
+    _guard_ours(task_name, "update")
+    delete_task(task_name)
+    return create_task(name, scenario, days, time_hhmm)
+
+
+def toggle_task(task_name: str, enable: bool):
+    """Enable/disable one of OUR tasks."""
+    _guard_ours(task_name, "toggle")
+    r = _schtasks(["/change", "/tn", task_name, "/enable" if enable else "/disable"])
+    if r.returncode != 0:
+        _fail("/change", r)
+    log.info("Windows task %s: %s", "enabled" if enable else "disabled", task_name)
 
 
 def sync(cloud: Cloud) -> dict:

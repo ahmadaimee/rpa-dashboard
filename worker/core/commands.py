@@ -75,6 +75,19 @@ class CommandHandler:
                 winsched.sync(self.cloud)
                 self.cloud.finish_command(cmd["id"], True)
 
+            elif ctype == "win_sched_update":
+                task_name = winsched.update_task(
+                    payload["task_name"], payload["name"], payload["scenario"],
+                    payload.get("days") or [], payload.get("time") or "00:00",
+                )
+                winsched.sync(self.cloud)
+                self.cloud.finish_command(cmd["id"], True, {"task_name": task_name})
+
+            elif ctype == "win_sched_toggle":
+                winsched.toggle_task(payload["task_name"], bool(payload.get("enable")))
+                winsched.sync(self.cloud)
+                self.cloud.finish_command(cmd["id"], True)
+
             elif ctype == "scan":
                 result = scanner.scan(self.cloud, self.cfg,
                                       folder=payload.get("folder") or None)

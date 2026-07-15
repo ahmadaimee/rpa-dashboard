@@ -1,3 +1,5 @@
 supabase>=2.4
 keyboard>=0.13
+pillow>=10.0
+pystray>=0.19
 pyinstaller>=6.0

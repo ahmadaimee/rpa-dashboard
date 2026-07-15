@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME   = "OrchardRPA"
+APP_NAME   = "RPA-Bot"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PID_FILE    = CONFIG_DIR / "worker.pid"

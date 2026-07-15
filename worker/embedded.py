@@ -8,3 +8,4 @@ import os
 
 SUPABASE_URL      = os.environ.get("ORCHARD_SUPABASE_URL",      "https://luuxmkhjoxqdzgjyerbc.supabase.co")
 SUPABASE_ANON_KEY = os.environ.get("ORCHARD_SUPABASE_ANON_KEY", "sb_publishable_xCofdWrVHGYRtrvx1iK1GQ_qAwfRKNB")
+DASHBOARD_URL     = os.environ.get("ORCHARD_DASHBOARD_URL",     "https://ahmadaimee.github.io/rpa-dashboard/")

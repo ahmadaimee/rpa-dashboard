@@ -17,7 +17,7 @@ from .config import CONFIG_DIR, PID_FILE, USERNAME
 
 log = logging.getLogger("worker")
 
-TASK_NAME = f"OrchardRPA-Worker-{USERNAME}"
+TASK_NAME = f"RPA-Bot-Worker-{USERNAME}"
 
 
 # ── register with the cloud via the edge function ────────────
@@ -50,7 +50,7 @@ def register(supabase_url: str, anon_key: str, code: str,
 def interactive_install(supabase_url: str, anon_key: str, app_version: str):
     print()
     print("  +----------------------------------------------+")
-    print("  |     Orchard RPA — Worker Setup               |")
+    print("  |     RPA-Bot — Worker Setup                   |")
     print("  +----------------------------------------------+")
     print(f"  PC / User : {USERNAME} @ {socket.gethostname()}")
     print()
@@ -120,7 +120,7 @@ def install_startup_task():
     workdir = str(Path(cfgmod.exe_path()).parent)
     xml = f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>Orchard RPA Worker — {USERNAME}</Description></RegistrationInfo>
+  <RegistrationInfo><Description>RPA-Bot Worker — {USERNAME}</Description></RegistrationInfo>
   <Triggers>
     <LogonTrigger><Enabled>true</Enabled>
       <UserId>{os.environ.get("USERDOMAIN", ".")}\\{USERNAME}</UserId>
@@ -222,8 +222,8 @@ def acquire_instance_lock():
 
 # ── uninstall ────────────────────────────────────────────────
 def uninstall(cloud=None):
-    print("\n  Orchard RPA — Uninstaller")
-    print("  =========================")
+    print("\n  RPA-Bot — Uninstaller")
+    print("  =====================")
     remove_startup_task()
     # Kill a running background worker
     if PID_FILE.exists():
@@ -240,5 +240,14 @@ def uninstall(cloud=None):
             cloud.set_status("offline")
         except Exception:
             pass
+    # Clear the registration so a fresh install re-pairs cleanly
+    if cfgmod.CONFIG_FILE.exists():
+        cfgmod.CONFIG_FILE.unlink(missing_ok=True)
+        print("  Registration cleared (config.json deleted).")
     print("  ✅ Worker removed from this PC.")
     print("     Remove/disable the PC in the dashboard Settings tab to revoke access.")
+
+
+def clear_registration():
+    """Wipe local credentials so the next run pairs fresh."""
+    cfgmod.CONFIG_FILE.unlink(missing_ok=True)
