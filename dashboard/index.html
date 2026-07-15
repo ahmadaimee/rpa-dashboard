@@ -1272,7 +1272,8 @@ function renderCompanies() {
   document.getElementById('release-card').classList.toggle('hidden', !isSuper);
   const staffCo = document.getElementById('staff-co');
   const staffOpts = '<option value="">— Select —</option>' +
-    G.companies.map(c => `<option value="${esc(c.slug)}">${esc(c.name)}</option>`).join('');
+    G.companies.map(c => `<option value="${esc(c.slug)}">${esc(c.name)}</option>`).join('') +
+    '<option value="__super__">⭐ Super Admin (sab companies)</option>';
   if (staffCo._last !== staffOpts) { staffCo.innerHTML = staffOpts; staffCo._last = staffOpts; }
   const wrap = document.getElementById('co-switch-wrap');
   wrap.classList.toggle('hidden', !isSuper || !G.companies.length);
@@ -1311,9 +1312,12 @@ async function inviteStaff() {
   const result = document.getElementById('staff-result');
   const btn = document.getElementById('staff-btn');
   if (!email) return alert('Email likhen.');
-  if (!company) return alert('Company select karen.');
+  if (!company) return alert('Company (ya Super Admin) select karen.');
+  const isSuper = company === '__super__';
+  if (isSuper && !confirm('Super Admin ko SAB companies ka mukammal access hoga\n(companies/staff/releases samet). Continue?')) return;
   btn.disabled = true;
-  const { data, error } = await sb.functions.invoke('invite-admin', { body: { email, company } });
+  const body = isSuper ? { email, super: true } : { email, company };
+  const { data, error } = await sb.functions.invoke('invite-admin', { body });
   btn.disabled = false;
   if (error || data?.error) {
     result.className = 'mt-3 rounded px-4 py-3 text-sm bg-red-50 border border-red-200 text-red-800';
@@ -1323,7 +1327,7 @@ async function inviteStaff() {
     result.innerHTML = `✅ Login ban gaya — ye detail staff ko den (password dobara nahi dikhega):<br>
       <span class="font-mono text-gray-800">Email: ${esc(data.email)}</span><br>
       <span class="font-mono text-gray-800 select-all">Password: ${esc(data.password)}</span><br>
-      <span class="text-xs text-green-700">Company: ${esc(coName(data.company))} · Login: is dashboard ka URL · pehli login ke baad "Change password" se apna password badal len.</span>`;
+      <span class="text-xs text-green-700">${data.company ? 'Company: ' + esc(coName(data.company)) : 'Role: Super Admin (sab companies)'} · Login: is dashboard ka URL · pehli login ke baad "Change password" se apna password badal len.</span>`;
     document.getElementById('staff-email').value = '';
   }
 }
