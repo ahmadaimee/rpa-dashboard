@@ -22,7 +22,7 @@ import time
 from version import __version__
 import embedded
 from core import config as cfgmod
-from core import installer, scanner, heartbeat
+from core import installer, scanner, heartbeat, updater
 from core.cloud import Cloud
 from core.commands import CommandHandler
 from core.runner import Runner
@@ -107,6 +107,11 @@ def worker_loop(cfg: cfgmod.Config):
     while not cmds.shutdown.is_set():
         try:
             tick += 1
+            # Auto-update: shortly after start, then every ~30 min, or on
+            # dashboard command — only while idle (never mid-scenario).
+            if (tick % 900 == 5 or cmds.update_requested) and not runner.current_task_id:
+                cmds.update_requested = False
+                updater.check_and_apply(cloud, __version__)
             # Respect the dashboard 'enabled' switch (checked every ~30 s)
             if tick % 15 == 1:
                 if not cloud.worker_enabled():

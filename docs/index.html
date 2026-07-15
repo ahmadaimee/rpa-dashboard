@@ -316,12 +316,12 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
 
     <div class="card overflow-hidden">
       <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50">
-        <h2 class="text-sm font-semibold text-gray-700">Scheduled Tasks on <span id="win-pc-label">PC</span></h2>
+        <h2 class="text-sm font-semibold text-gray-700">Scheduled Tasks — per PC</h2>
         <span id="win-task-count" class="text-xs text-gray-400"></span>
       </div>
-      <div id="win-task-list" class="divide-y divide-gray-100"></div>
+      <div id="win-task-list"></div>
       <div id="win-task-empty" class="py-10 text-center text-gray-400 text-sm hidden">
-        No data yet — select a PC and press <strong>Refresh from PC</strong>.
+        No data yet — press <strong>↻ Refresh</strong> on a PC below, or restart its worker (it syncs on startup).
       </div>
     </div>
   </div>
@@ -338,6 +338,28 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
         <span id="new-code" class="hidden font-mono text-lg tracking-widest bg-blue-50 border border-blue-200 text-blue-700 px-4 py-1.5 rounded select-all"></span>
       </div>
       <div id="code-list" class="mt-3 space-y-1"></div>
+    </div>
+
+    <div class="card p-5 mb-4" style="border-left:3px solid #9333ea;">
+      <h2 class="text-base font-semibold text-gray-900 mb-1">⬆️ Worker App Updates</h2>
+      <p class="text-xs text-gray-500 mb-3">
+        Publish a new <code class="text-gray-700">OrchardRPAWorker.exe</code> — every worker checks
+        shortly after start and every ~30 minutes, verifies the file hash, and updates itself automatically
+        (never mid-scenario). Use a worker's <strong>Update</strong> button below to force it immediately.
+      </p>
+      <p class="text-xs text-gray-600 mb-3">Latest published version: <span id="latest-release" class="font-mono text-purple-700">none yet</span></p>
+      <div class="flex flex-wrap gap-3 items-end">
+        <div class="w-32">
+          <label class="block text-xs text-gray-500 mb-1">Version</label>
+          <input id="rel-version" type="text" placeholder="1.2.0" class="w-full px-3 py-2 text-sm font-mono">
+        </div>
+        <div class="flex-1 min-w-[220px]">
+          <label class="block text-xs text-gray-500 mb-1">OrchardRPAWorker.exe</label>
+          <input id="rel-file" type="file" accept=".exe" class="w-full text-sm text-gray-500">
+        </div>
+        <button id="rel-btn" onclick="publishRelease()" class="btn-primary">Publish Release</button>
+      </div>
+      <p id="rel-status" class="text-xs mt-2 hidden"></p>
     </div>
 
     <div class="card p-5">
@@ -381,7 +403,7 @@ const ONLINE_MS = 30_000;
 const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-let G = { workers:[], scenarios:[], tasks:[], schedules:[], codes:[], winTasks:[], scanCmd:null, winCmd:null, custCmd:null };
+let G = { workers:[], scenarios:[], tasks:[], schedules:[], codes:[], winTasks:[], latestRelease:null, scanCmd:null, winCmd:null, custCmd:null };
 let activeTab = 'dashboard';
 let logTaskId = null, logLines = [];
 
@@ -427,13 +449,14 @@ function setConn(up, label) {
 }
 
 async function fetchAll() {
-  const [w, s, t, sc, pc, wt] = await Promise.all([
+  const [w, s, t, sc, pc, wt, rel] = await Promise.all([
     sb.from('workers').select('*').order('username'),
     sb.from('scenarios').select('*').order('name'),
     sb.from('tasks').select('*').order('created_at', { ascending:false }).limit(300),
     sb.from('schedules').select('*').order('created_at'),
     sb.from('pairing_codes').select('*').is('used_at', null).gt('expires_at', new Date().toISOString()),
     sb.from('win_tasks').select('*').order('task_name'),
+    sb.from('worker_releases').select('*').order('released_at', { ascending:false }).limit(1),
   ]);
   if (w.data)  G.workers   = w.data;
   if (s.data)  G.scenarios = s.data;
@@ -441,6 +464,7 @@ async function fetchAll() {
   if (sc.data) G.schedules = sc.data;
   if (pc.data) G.codes     = pc.data;
   if (wt.data) G.winTasks  = wt.data;
+  if (rel.data) G.latestRelease = rel.data[0] || null;
   document.getElementById('last-sync').textContent = new Date().toLocaleTimeString();
 }
 
@@ -806,30 +830,58 @@ function selectedWinWorker() {
   return workerById(id) || null;
 }
 
+let collapsedWinPcs = new Set();
+function toggleWinPc(id) {
+  collapsedWinPcs.has(id) ? collapsedWinPcs.delete(id) : collapsedWinPcs.add(id);
+  renderWinTasks();
+}
+
 function renderWinTasks() {
-  const w = selectedWinWorker();
-  document.getElementById('win-pc-label').textContent = w ? (w.display_name || w.username) : 'PC';
   const list = document.getElementById('win-task-list');
   const empty = document.getElementById('win-task-empty');
-  const rows = w ? G.winTasks.filter(t => t.worker_id === w.id) : [];
   document.getElementById('win-task-count').textContent =
-    rows.length ? `${rows.length} task(s) · last synced ${new Date(Math.max(...rows.map(r => new Date(r.updated_at)))).toLocaleString()}` : '';
-  if (!rows.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
-  empty.classList.add('hidden');
+    G.winTasks.length ? `${G.winTasks.length} task(s) across ${new Set(G.winTasks.map(t => t.worker_id)).size} PC(s)` : '';
+  if (!G.workers.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.toggle('hidden', G.winTasks.length > 0);
 
-  const sorted = [...rows].sort((a, b) => (b.is_ours - a.is_ours) || a.task_name.localeCompare(b.task_name));
-  diffList(list, sorted.map(t => ({ key: t.id, html: `
-    <div class="flex items-center gap-4 px-5 py-2.5 hover:bg-gray-50 transition-colors">
-      <div class="w-5 flex-shrink-0 text-center text-sm">${t.is_ours ? '🤖' : '🪟'}</div>
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium truncate text-gray-900">${esc(t.task_name)}</p>
-        <p class="text-xs text-gray-400 truncate">${esc(t.schedule || '')}${t.task_to_run ? ' · ' + esc(t.task_to_run) : ''}</p>
-        <p class="text-xs text-gray-400 mt-0.5">Next: ${esc(t.next_run || '—')} · Last: ${esc(t.last_run || 'never')}${t.last_result ? ' (result ' + esc(t.last_result) + ')' : ''}</p>
-      </div>
-      <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded border ${t.status === 'Running' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-500 border-gray-200'}">${esc(t.status || '?')}</span>
-      ${t.is_ours ? `<button onclick="winSchedDelete('${esc(t.task_name)}')" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0 cursor-pointer">Delete</button>`
-                  : '<span class="text-xs text-gray-300 flex-shrink-0">read-only</span>'}
-    </div>` })));
+  const items = [];
+  for (const w of G.workers) {
+    const rows = G.winTasks.filter(t => t.worker_id === w.id)
+      .sort((a, b) => (b.is_ours - a.is_ours) || a.task_name.localeCompare(b.task_name));
+    const online = isOnline(w);
+    const collapsed = collapsedWinPcs.has(w.id);
+    const synced = rows.length ? new Date(Math.max(...rows.map(r => new Date(r.updated_at)))).toLocaleString() : null;
+    items.push({ key: 'pc-' + w.id, html: `
+      <div class="flex items-center gap-3 px-5 py-2.5 bg-gray-50 border-y border-gray-100">
+        <span onclick="toggleWinPc('${w.id}')" class="cursor-pointer text-xs text-gray-500 select-none">${collapsed ? '▶' : '▼'}</span>
+        <span class="w-2 h-2 rounded-full flex-shrink-0 ${online ? 'bg-green-500 pulse-dot' : 'bg-gray-300'}"></span>
+        <span onclick="toggleWinPc('${w.id}')" class="text-sm font-semibold text-gray-800 cursor-pointer select-none">${esc(w.display_name || w.username)}</span>
+        <span class="text-xs text-gray-400">${rows.length} task(s)${synced ? ' · synced ' + synced : ''}</span>
+        <span class="flex-1"></span>
+        <button onclick="winSchedRefreshFor('${w.id}')" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded cursor-pointer">↻ Refresh</button>
+      </div>` });
+    if (collapsed) continue;
+    if (!rows.length) {
+      items.push({ key: 'pc-' + w.id + '-none', html: `
+        <div class="px-5 py-3 text-xs text-gray-400">No data — press ↻ Refresh (worker must be online).</div>` });
+      continue;
+    }
+    for (const t of rows) {
+      items.push({ key: t.id, html: `
+        <div class="flex items-center gap-4 px-5 py-2.5 hover:bg-gray-50 transition-colors">
+          <div class="w-5 flex-shrink-0 text-center text-sm">${t.is_ours ? '🤖' : '🪟'}</div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium truncate text-gray-900">${esc(t.task_name)}</p>
+            <p class="text-xs text-gray-400 truncate">${esc(t.schedule || '')}${t.task_to_run ? ' · ' + esc(t.task_to_run) : ''}</p>
+            <p class="text-xs text-gray-400 mt-0.5">Next: ${esc(t.next_run || '—')} · Last: ${esc(t.last_run || 'never')}${t.last_result ? ' (result ' + esc(t.last_result) + ')' : ''}</p>
+          </div>
+          <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded border ${t.status === 'Running' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-500 border-gray-200'}">${esc(t.status || '?')}</span>
+          ${t.is_ours ? `<button onclick="winSchedDeleteFor('${w.id}','${esc(t.task_name)}')" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0 cursor-pointer">Delete</button>`
+                      : '<span class="text-xs text-gray-300 flex-shrink-0">read-only</span>'}
+        </div>` });
+    }
+  }
+  diffList(list, items);
 }
 
 function renderWinStatus() {
@@ -861,6 +913,24 @@ async function _winCommand(type, payload) {
 }
 
 async function winSchedRefresh() { await _winCommand('win_sched_list', {}); }
+
+async function _winCommandFor(workerId, type, payload) {
+  const w = workerById(workerId);
+  if (!w) return;
+  if (!isOnline(w) && !confirm(`"${w.display_name || w.username}" is offline.\nThe command will run when it comes back online. Continue?`)) return;
+  const { data, error } = await sb.from('commands')
+    .insert({ worker_id: workerId, type, payload: payload || {} }).select().single();
+  if (error) return alert('Error: ' + error.message);
+  G.winCmd = data;
+  renderWinStatus();
+}
+
+async function winSchedRefreshFor(workerId) { await _winCommandFor(workerId, 'win_sched_list', {}); }
+
+async function winSchedDeleteFor(workerId, taskName) {
+  if (!confirm(`Delete Windows scheduled task "${taskName}"?`)) return;
+  await _winCommandFor(workerId, 'win_sched_delete', { task_name: taskName });
+}
 
 async function winSchedCreate() {
   const name = document.getElementById('win-name').value.trim();
@@ -901,6 +971,7 @@ function diffSettings() {
         </div>
         <span class="text-xs font-medium ${online ? 'text-green-600' : 'text-gray-400'}">${online ? 'Online' : 'Offline'}</span>
         <div class="flex gap-2 flex-shrink-0">
+          ${workerOutdated(w) ? `<button onclick="forceUpdate('${w.id}')" title="v${esc(w.app_version)} → v${esc(G.latestRelease.version)}" class="text-xs text-purple-600 border border-purple-200 bg-purple-50 hover:bg-purple-100 px-3 py-1 rounded cursor-pointer">⬆ Update</button>` : ''}
           <button onclick="toggleWorker('${w.id}', ${!w.enabled})" class="text-xs px-3 py-1 rounded border cursor-pointer ${w.enabled ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}">${w.enabled ? 'Enabled' : 'Disabled'}</button>
           ${online ? `<button onclick="sendWorkerCmd('${w.id}','restart')" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 px-3 py-1 rounded cursor-pointer">Restart</button>
           <button onclick="sendWorkerCmd('${w.id}','shutdown')" class="text-xs text-orange-600 border border-orange-200 bg-orange-50 px-3 py-1 rounded cursor-pointer">Kill</button>` : ''}
@@ -930,6 +1001,74 @@ function diffSchedules() {
         <button onclick="deleteSched('${s.id}')" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0 cursor-pointer">Delete</button>
       </div>` };
   }));
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Worker releases (auto-update)
+// ═══════════════════════════════════════════════════════════
+function verTuple(v) { return String(v || '0').replace(/^v/, '').split('.').map(n => parseInt(n) || 0); }
+function verLess(a, b) {
+  const ta = verTuple(a), tb = verTuple(b);
+  for (let i = 0; i < Math.max(ta.length, tb.length); i++) {
+    if ((ta[i] || 0) !== (tb[i] || 0)) return (ta[i] || 0) < (tb[i] || 0);
+  }
+  return false;
+}
+function workerOutdated(w) {
+  return G.latestRelease && w.app_version && verLess(w.app_version, G.latestRelease.version);
+}
+
+function renderRelease() {
+  const el = document.getElementById('latest-release');
+  el.textContent = G.latestRelease
+    ? `v${G.latestRelease.version} (${new Date(G.latestRelease.released_at).toLocaleString()})`
+    : 'none yet';
+}
+
+async function publishRelease() {
+  const version = document.getElementById('rel-version').value.trim().replace(/^v/, '');
+  const fileInput = document.getElementById('rel-file');
+  const file = fileInput.files[0];
+  const status = document.getElementById('rel-status');
+  const btn = document.getElementById('rel-btn');
+  if (!/^\d+\.\d+(\.\d+)?$/.test(version)) return alert('Enter a version like 1.2.0');
+  if (!file) return alert('Choose the OrchardRPAWorker.exe file.');
+  if (G.latestRelease && !verLess(G.latestRelease.version, version))
+    return alert(`Version must be higher than the latest (${G.latestRelease.version}).`);
+  if (!confirm(`Publish v${version}? All workers will self-update within ~30 minutes.`)) return;
+
+  btn.disabled = true;
+  status.className = 'text-xs mt-2 text-yellow-600';
+  status.classList.remove('hidden');
+  try {
+    status.textContent = '⏳ Computing hash…';
+    const buf = await file.arrayBuffer();
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))]
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    const path = `releases/${version}/OrchardRPAWorker.exe`;
+    status.textContent = `⏳ Uploading ${(file.size / 1048576).toFixed(1)} MB…`;
+    const { error: upErr } = await sb.storage.from('worker-releases')
+      .upload(path, buf, { upsert: true, contentType: 'application/octet-stream' });
+    if (upErr) throw upErr;
+    status.textContent = '⏳ Registering release…';
+    const { error: insErr } = await sb.from('worker_releases')
+      .upsert({ version, storage_path: path, sha256: hash });
+    if (insErr) throw insErr;
+    status.className = 'text-xs mt-2 text-green-600';
+    status.textContent = `✅ v${version} published — workers will pick it up automatically.`;
+    document.getElementById('rel-version').value = '';
+    fileInput.value = '';
+    scheduleRefetch();
+  } catch (e) {
+    status.className = 'text-xs mt-2 text-red-600';
+    status.textContent = '❌ ' + (e.message || e);
+  }
+  btn.disabled = false;
+}
+
+async function forceUpdate(workerId) {
+  await sb.from('commands').insert({ worker_id: workerId, type: 'update' });
+  alert('Update command sent — the worker updates as soon as it is idle.');
 }
 
 function renderCodes() {
@@ -1012,6 +1151,7 @@ function renderAll() {
   refreshLogSelect();
   renderScan();
   renderWinTasks();
+  renderRelease();
 }
 
 // ═══════════════════════════════════════════════════════════

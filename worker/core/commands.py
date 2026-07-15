@@ -25,7 +25,7 @@ class CommandHandler:
         self.cfg = cfg
         self.runner = runner
         self.shutdown = threading.Event()   # main loop watches this
-        self.restart = False
+        self.update_requested = False       # main loop applies when idle
 
     def start(self) -> threading.Thread:
         t = threading.Thread(target=self._loop, daemon=True, name="commands")
@@ -97,6 +97,11 @@ class CommandHandler:
                     subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
                     | subprocess.CREATE_NO_WINDOW))
                 os._exit(0)
+
+            elif ctype == "update":
+                self.update_requested = True
+                self.cloud.finish_command(cmd["id"], True,
+                                          {"note": "update check scheduled (applies when idle)"})
 
             else:
                 self.cloud.finish_command(cmd["id"], False,

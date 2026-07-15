@@ -153,6 +153,21 @@ class Cloud:
             "finish_command",
         )
 
+    # ── releases (auto-update) ──────────────────────────────
+    def latest_release(self) -> dict | None:
+        res = self._safe(
+            lambda: self.client.table("worker_releases").select("*")
+                .order("released_at", desc=True).limit(1).execute(),
+            "latest_release",
+        )
+        return res.data[0] if res and res.data else None
+
+    def download_release(self, storage_path: str) -> bytes | None:
+        return self._safe(
+            lambda: self.client.storage.from_("worker-releases").download(storage_path),
+            "download_release",
+        )
+
     # ── windows scheduler snapshot ──────────────────────────
     def replace_win_tasks(self, rows: list[dict]):
         self._safe(
