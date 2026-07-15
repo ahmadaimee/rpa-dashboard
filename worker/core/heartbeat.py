@@ -16,7 +16,8 @@ from .rkdetect import RkMonitor
 
 log = logging.getLogger("worker")
 
-HEARTBEAT_INTERVAL = 10
+SAMPLE_INTERVAL = 3       # rk detection cadence — changes push to the cloud instantly
+HEARTBEAT_INTERVAL = 10   # regular last_seen stamp when nothing changed
 
 # Shared so the command handler can stop external runs
 monitor = RkMonitor()
@@ -58,15 +59,23 @@ def _handle_external(cloud: Cloud, runner: Runner, rk: dict):
 
 def start(cloud: Cloud, runner: Runner, app_version: str) -> threading.Thread:
     def loop():
+        last_push = 0.0
+        last_state = None
         while True:
             try:
                 rk = monitor.sample()
                 status = "running" if (runner.current_task_id or rk["running"]) else "idle"
-                cloud.heartbeat(status, rk, app_version)
+                state = (status, rk["running"], rk["open"], rk["scenario"])
+                # Push immediately on any change; otherwise stamp every 10 s
+                if (rk["event"] or state != last_state
+                        or time.monotonic() - last_push >= HEARTBEAT_INTERVAL):
+                    cloud.heartbeat(status, rk, app_version)
+                    last_push = time.monotonic()
+                    last_state = state
                 _handle_external(cloud, runner, rk)
             except Exception as e:
                 log.debug("Heartbeat error: %s", e)
-            time.sleep(HEARTBEAT_INTERVAL)
+            time.sleep(SAMPLE_INTERVAL)
 
     t = threading.Thread(target=loop, daemon=True, name="heartbeat")
     t.start()

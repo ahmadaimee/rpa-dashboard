@@ -16,7 +16,7 @@ from . import heartbeat, rkdetect, scanner, winsched
 
 log = logging.getLogger("worker")
 
-POLL_SECS = 5
+POLL_SECS = 3
 
 
 class CommandHandler:

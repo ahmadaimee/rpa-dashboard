@@ -27,8 +27,8 @@ log = logging.getLogger("worker")
 
 RK_LOG_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "KEYENCE" / "RkScenarioManager" / "Log"
 FRESH_FOLDER_SECS = 120             # folder-without-log only *starts* a run if this fresh
-CPU_ACTIVE_100NS = 1_500_000        # 0.15 s cpu-time between samples (~1.5%/10s)
-QUIET_SAMPLES_TO_END = 6            # ~60 s of silence → consider the run over
+CPU_RATE_100NS_PER_SEC = 150_000    # ≥1.5% of one core = "actively executing"
+QUIET_SECS_TO_END = 45              # this long with no activity → run is over
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
 
@@ -126,7 +126,7 @@ def wait_run_end(stop_event, baseline: dict, poll_secs: float = 3.0,
             return
         active = any(
             last_cpu.get(p["pid"]) is not None
-            and p["cputime"] - last_cpu[p["pid"]] > int(CPU_ACTIVE_100NS * poll_secs / 10)
+            and p["cputime"] - last_cpu[p["pid"]] > int(CPU_RATE_100NS_PER_SEC * poll_secs)
             for p in procs
         )
         last_cpu = {p["pid"]: p["cputime"] for p in procs}
@@ -142,17 +142,18 @@ class RkMonitor:
     def force_end(self):
         """The run was killed by us — report idle immediately."""
         self._running = False
-        self._quiet = 0
+        self._quiet_since = None
         self._scenario = None
         self._active_pids = []
 
     def __init__(self):
         self._last_cpu: dict[int, int] = {}
+        self._last_sample_at: float | None = None
         self._known_logs: dict[str, float] = {}   # RunningLog path → mtime
         self._hash_names: dict[str, str] = {}
         self._hash_names_at = 0.0
         self._running = False
-        self._quiet = 0
+        self._quiet_since: float | None = None
         self._scenario: str | None = None
         self._active_pids: list[int] = []
         self._primed = False
@@ -223,10 +224,15 @@ class RkMonitor:
         opened = rk_app_open()
         procs = keyence_dotnet_procs() if opened else []
 
+        now_mono = time.monotonic()
+        elapsed = max(now_mono - self._last_sample_at, 1.0) if self._last_sample_at else 10.0
+        self._last_sample_at = now_mono
+        threshold = int(CPU_RATE_100NS_PER_SEC * elapsed)
+
         active_pids = []
         for p in procs:
             prev = self._last_cpu.get(p["pid"])
-            if prev is not None and p["cputime"] - prev > CPU_ACTIVE_100NS:
+            if prev is not None and p["cputime"] - prev > threshold:
                 active_pids.append(p["pid"])
         self._last_cpu = {p["pid"]: p["cputime"] for p in procs}
 
@@ -241,7 +247,7 @@ class RkMonitor:
         elif not self._running:
             if cpu_active or no_log:
                 self._running = True
-                self._quiet = 0
+                self._quiet_since = None
                 self._active_pids = active_pids
                 self._refresh_hash_names()
                 name = None
@@ -258,10 +264,11 @@ class RkMonitor:
                 self._scenario = ended_name  # final, accurate name
                 event = "ended"
             elif cpu_active or no_log:
-                self._quiet = 0
+                self._quiet_since = None
             else:
-                self._quiet += 1
-                if self._quiet >= QUIET_SAMPLES_TO_END or not opened:
+                if self._quiet_since is None:
+                    self._quiet_since = now_mono
+                if now_mono - self._quiet_since >= QUIET_SECS_TO_END or not opened:
                     self._running = False
                     event = "ended"
 
