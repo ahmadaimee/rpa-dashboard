@@ -33,6 +33,7 @@ class Cloud:
         self._lock = threading.RLock()
         self._signin_at = 0.0        # monotonic time of last sign-in attempt
         self._signin_backoff = 0.0   # grows on failures/429s
+        self._consec_failures = 0    # self-heal restart when the client is wedged
 
     # ── auth ────────────────────────────────────────────────
     def sign_in(self):
@@ -63,14 +64,33 @@ class Cloud:
                 try:
                     if not self._signed_in:
                         self._sign_in_locked()
-                    return fn()
+                    result = fn()
+                    self._consec_failures = 0
+                    return result
                 except Exception as e:
                     log.warning("%s failed (attempt %d): %s",
                                 what, attempt, str(e)[:200])
                     if attempt == 1:
                         self._signed_in = False
                         time.sleep(1)
+            self._consec_failures += 1
+            if self._consec_failures >= 30:
+                self._self_heal()
             return default
+
+    def _self_heal(self):
+        """The client is wedged (e.g. PyInstaller temp dir deleted from under
+        us) — restart the whole worker; a fresh process fully recovers."""
+        import os
+        log.error("30+ consecutive cloud failures — restarting worker to recover")
+        try:
+            from . import installer
+            from .config import PID_FILE
+            PID_FILE.unlink(missing_ok=True)
+            installer.relaunch_background()
+        except Exception as e:
+            log.error("Self-heal relaunch failed: %s", e)
+        os._exit(1)
 
     # ── workers ─────────────────────────────────────────────
     def heartbeat(self, status: str, rk: dict, app_version: str):

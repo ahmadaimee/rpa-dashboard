@@ -13,6 +13,32 @@ LOG_FILE    = CONFIG_DIR / "worker.log"
 
 USERNAME = os.environ.get("USERNAME", "UNKNOWN")
 
+
+def _pin_ca_bundle():
+    """PyInstaller onefile extracts certifi's CA bundle into a temp dir that
+    Windows temp-cleanup can delete while the worker is running — after which
+    every NEW TLS connection fails with [Errno 2] on cacert.pem (observed in
+    production). Copy the bundle to our stable config dir and point certifi,
+    httpx and requests at it. Must run before httpx is imported."""
+    try:
+        import shutil
+        import certifi
+        stable = CONFIG_DIR / "cacert.pem"
+        src = certifi.where()
+        if os.path.isfile(src):
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            if not stable.exists() or stable.stat().st_size != os.path.getsize(src):
+                shutil.copyfile(src, stable)
+        if stable.exists():
+            os.environ["SSL_CERT_FILE"] = str(stable)
+            os.environ["REQUESTS_CA_BUNDLE"] = str(stable)
+            certifi.where = lambda: str(stable)
+    except Exception:
+        pass
+
+
+_pin_ca_bundle()
+
 DEFAULT_RK_EXE = r"C:\Program Files\KEYENCE\RK-10\RkScenarioManager.exe"
 DEFAULT_SCENARIOS_FOLDER = (
     r"C:\Users\{USERNAME}\Orchard Medical Management"
