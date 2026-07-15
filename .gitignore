@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+worker/build/
+worker/dist/
+worker/*.spec
+# Real credentials — keep placeholders in git, paste real values locally only
+# (embedded.py and config.js ship with YOUR-PROJECT placeholders; if you put
+#  real keys in them, prefer local-only copies)
+.env

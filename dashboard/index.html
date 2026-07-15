@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orchard RPA — Control Room</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<style>
+@keyframes spin      { to { transform:rotate(360deg); } }
+@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
+@keyframes bar-run   { 0%{transform:translateX(-100%)} 100%{transform:translateX(300%)} }
+@keyframes fade-in   { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+
+.spin      { animation:spin 1s linear infinite; display:inline-block; }
+.pulse-dot { animation:pulse-dot 2s ease-in-out infinite; }
+.bar-run   { animation:bar-run 1.8s ease-in-out infinite; }
+.fade-in   { animation:fade-in .2s ease-out both; }
+
+body { font-family:'Segoe UI',system-ui,sans-serif; background:#f3f3f3; color:#1a1a1a; }
+.tab-active { border-bottom:2px solid #0078d4; color:#0078d4; font-weight:600; }
+.card { background:#fff; border:1px solid #e5e7eb; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+
+input[type=text], input[type=email], input[type=password], input[type=time], input[type=number], select, textarea {
+  background:#fff; border:1px solid #d1d5db; border-radius:4px; color:#111827; font-family:inherit;
+}
+input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0 2px rgba(0,120,212,.15); }
+
+.btn-primary {
+  background:#0078d4; color:#fff; border:none; border-radius:4px;
+  padding:.45rem 1.1rem; font-size:.8125rem; font-weight:500; cursor:pointer; transition:background .15s;
+}
+.btn-primary:hover  { background:#106ebe; }
+.btn-primary:active { background:#005a9e; transform:scale(.98); }
+.btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+
+.sched-day-lbl span {
+  display:inline-block; padding:.25rem .75rem; border-radius:2px;
+  font-size:.75rem; font-weight:500; cursor:pointer; border:1px solid #d1d5db;
+  background:#f9fafb; color:#374151; transition:all .15s; user-select:none;
+}
+.sched-day-lbl input:checked + span { background:#0078d4; border-color:#0078d4; color:#fff; }
+
+::-webkit-scrollbar { width:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:3px; }
+</style>
+</head>
+<body>
+
+<!-- ═══ LOGIN ═══ -->
+<div id="login-view" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-[#f3f3f3]">
+  <div class="card p-8 w-full max-w-sm">
+    <h1 class="text-xl font-semibold text-gray-900 mb-1">⚙️ Orchard RPA</h1>
+    <p class="text-gray-500 text-sm mb-6">Sign in to the control room</p>
+    <form onsubmit="doLogin(event)">
+      <label class="block text-xs text-gray-500 mb-1">Email</label>
+      <input id="login-email" type="email" required class="w-full px-3 py-2 text-sm mb-3" autocomplete="username">
+      <label class="block text-xs text-gray-500 mb-1">Password</label>
+      <input id="login-password" type="password" required class="w-full px-3 py-2 text-sm mb-4" autocomplete="current-password">
+      <button id="login-btn" type="submit" class="btn-primary w-full py-2">Sign in</button>
+      <p id="login-error" class="hidden text-xs text-red-600 mt-3"></p>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ APP ═══ -->
+<div id="app" class="hidden max-w-7xl mx-auto px-4 py-6">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight text-gray-900">⚙️ Orchard RPA</h1>
+      <p class="text-gray-500 text-sm mt-0.5">RK-Keyence Automation Control Room — Cloud</p>
+    </div>
+    <div class="flex items-center gap-4">
+      <span id="conn-status" class="flex items-center gap-1.5 text-xs text-gray-400">
+        <span id="conn-dot" class="w-2 h-2 rounded-full bg-gray-300 inline-block"></span>
+        <span id="conn-label">Connecting…</span>
+      </span>
+      <span id="last-sync" class="text-xs text-gray-400"></span>
+      <button onclick="doLogout()" class="text-xs text-gray-400 hover:text-red-500 cursor-pointer">Sign out</button>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex gap-1 border-b border-gray-200 mb-5 select-none">
+    <button onclick="tab('dashboard')" id="tab-dashboard" class="pb-2 px-3 text-sm tab-active cursor-pointer">Dashboard</button>
+    <button onclick="tab('scenarios')"  id="tab-scenarios"  class="pb-2 px-3 text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Scenarios</button>
+    <button onclick="tab('schedules')"  id="tab-schedules"  class="pb-2 px-3 text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Schedules</button>
+    <button onclick="tab('settings')"   id="tab-settings"   class="pb-2 px-3 text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Settings</button>
+    <button onclick="tab('logs')"       id="tab-logs"       class="pb-2 px-3 text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Logs</button>
+  </div>
+
+  <!-- ═══ DASHBOARD ═══ -->
+  <div id="view-dashboard">
+    <div id="pc-cards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
+
+    <div class="card p-5 mb-4" style="border-left:3px solid #0078d4;">
+      <div class="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h2 class="text-base font-semibold text-gray-900">▶▶ Run All Scenarios</h2>
+          <p class="text-xs text-gray-500 mt-0.5">Distributes every scenario across all online PCs — one scenario per PC, round-robin</p>
+        </div>
+        <div class="flex gap-2">
+          <button id="stop-all-btn" onclick="stopAll()" class="hidden text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 px-4 py-2 rounded text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer">
+            <span>⏹</span><span>Stop All</span>
+          </button>
+          <button id="run-all-btn" onclick="runAll()" class="btn-primary flex items-center gap-2 px-6 py-2">
+            <span>▶▶</span><span>Run All</span>
+          </button>
+        </div>
+      </div>
+      <div id="batch-progress" class="hidden mt-4">
+        <div class="flex items-center justify-between text-xs mb-1.5">
+          <span id="batch-label" class="text-gray-700 font-medium"></span>
+          <span id="batch-pct" class="text-gray-500"></span>
+        </div>
+        <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+          <div id="batch-bar" class="h-full rounded-full transition-all duration-500" style="width:0%;background:#0078d4"></div>
+        </div>
+        <div class="flex gap-4 mt-2 text-xs">
+          <span id="batch-pending" class="text-yellow-600"></span>
+          <span id="batch-running" class="text-blue-600"></span>
+          <span id="batch-completed" class="text-green-600"></span>
+          <span id="batch-failed" class="text-red-600"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-5 mb-4">
+      <h2 class="text-sm font-semibold text-gray-500 mb-3">▶ Run Single Scenario</h2>
+      <div class="flex flex-wrap gap-3 items-end">
+        <div class="flex-1 min-w-[200px]">
+          <select id="sel-scenario" class="w-full px-3 py-2 text-sm">
+            <option value="">— Select scenario —</option>
+          </select>
+        </div>
+        <div class="w-44"><select id="sel-pc" class="w-full px-3 py-2 text-sm"></select></div>
+        <button onclick="submitTask()" class="btn-primary">Run ▶</button>
+      </div>
+    </div>
+
+    <div class="card overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50">
+        <h2 class="text-sm font-semibold text-gray-700">Task Queue</h2>
+        <div class="flex gap-3 items-center">
+          <select id="filter-status" onchange="diffTasks()" class="px-2 py-1 text-xs">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="running">Running</option>
+            <option value="success">Success</option>
+            <option value="failed">Failed</option>
+            <option value="stopped">Stopped</option>
+          </select>
+          <button onclick="clearFinished()" class="text-xs text-gray-400 hover:text-red-500 cursor-pointer transition-colors">Clear Finished</button>
+        </div>
+      </div>
+      <div id="task-list" class="divide-y divide-gray-100"></div>
+      <div id="task-empty" class="py-10 text-center text-gray-400 text-sm hidden">No tasks in queue</div>
+    </div>
+  </div>
+
+  <!-- ═══ SCENARIOS ═══ -->
+  <div id="view-scenarios" class="hidden">
+    <div class="card p-5 mb-4">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div class="flex-1">
+          <h2 class="text-base font-semibold text-gray-900 mb-1">📂 Fetch from Folder</h2>
+          <p class="text-xs text-gray-500 mb-2">
+            Scans the Scenarios folder on an online worker and adds every <code class="text-gray-700">.rks</code> file to the library.
+          </p>
+          <div class="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono flex-wrap">
+            <span class="text-gray-400">Folder:</span>
+            <span class="text-gray-700">C:\Users\</span><span class="text-blue-600">{USERNAME}</span><span class="text-gray-700">\Orchard Medical Management\Automations-PatriotPay - Documents\</span><span class="text-green-600">Scenarios</span>
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-3 items-center mt-4">
+        <button id="scan-btn" onclick="requestScan()" class="btn-primary flex items-center gap-2">
+          <span id="scan-btn-icon">🔍</span><span id="scan-btn-label">Fetch / Update List</span>
+        </button>
+        <span id="scan-worker-hint" class="text-xs text-gray-400"></span>
+      </div>
+      <div id="scan-result" class="hidden mt-4 rounded px-4 py-3 text-sm"></div>
+    </div>
+
+    <div class="card p-5 mb-4">
+      <h2 class="text-base font-semibold text-gray-900 mb-3">➕ Add Manually</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Scenario Name (without .rks)</label>
+          <input id="inp-scenario-name" type="text" placeholder="e.g. DailyReport" class="w-full px-3 py-2 text-sm" onkeydown="if(event.key==='Enter') addScenario()">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Custom Path <span class="text-gray-400 font-normal">(optional — {USERNAME} substituted per PC)</span></label>
+          <input id="inp-scenario-path" type="text" placeholder="C:\Other\Path\MyScenario.rks" class="w-full px-3 py-2 text-sm">
+        </div>
+      </div>
+      <button onclick="addScenario()" class="btn-primary">Add</button>
+    </div>
+
+    <div class="card overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50">
+        <h2 class="text-sm font-semibold text-gray-700">Scenario Library</h2>
+        <span id="scenario-count" class="text-xs text-gray-400"></span>
+      </div>
+      <div id="scenario-list" class="divide-y divide-gray-100"></div>
+      <div id="scenario-empty" class="py-10 text-center text-gray-400 text-sm hidden">No scenarios yet — use Fetch or add manually.</div>
+    </div>
+  </div>
+
+  <!-- ═══ SCHEDULES ═══ -->
+  <div id="view-schedules" class="hidden">
+    <div class="card p-5 mb-4">
+      <h2 class="text-base font-semibold text-gray-900 mb-1">➕ New Schedule</h2>
+      <p class="text-xs text-gray-500 mb-4">Each schedule triggers <strong class="text-gray-700">Run All</strong> at the given time — evaluated in the cloud, works even when this dashboard is closed.</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="md:col-span-2">
+          <label class="block text-xs text-gray-500 mb-1">Schedule Name</label>
+          <input id="sched-name" type="text" placeholder="e.g. Nightly Run" class="w-full px-3 py-2 text-sm">
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-xs text-gray-500 mb-2">Days of Week</label>
+          <div class="flex flex-wrap gap-2" id="sched-days">
+            <label class="sched-day-lbl"><input type="checkbox" value="0" class="sched-day sr-only"><span>Sun</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="1" class="sched-day sr-only"><span>Mon</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="2" class="sched-day sr-only"><span>Tue</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="3" class="sched-day sr-only"><span>Wed</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="4" class="sched-day sr-only"><span>Thu</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="5" class="sched-day sr-only"><span>Fri</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="6" class="sched-day sr-only"><span>Sat</span></label>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Time (24-hour, <span id="sched-tz" class="font-mono"></span>)</label>
+          <input id="sched-time" type="time" value="00:00" class="w-full px-3 py-2 text-sm">
+        </div>
+      </div>
+      <button onclick="addSchedule()" class="btn-primary mt-4">Add Schedule</button>
+    </div>
+    <div class="card overflow-hidden">
+      <h2 class="text-sm font-semibold text-gray-700 px-5 py-3 border-b border-gray-200 bg-gray-50">Active Schedules</h2>
+      <div id="schedule-list" class="divide-y divide-gray-100"></div>
+      <div id="schedule-empty" class="py-10 text-center text-gray-400 text-sm hidden">No schedules configured</div>
+    </div>
+  </div>
+
+  <!-- ═══ SETTINGS ═══ -->
+  <div id="view-settings" class="hidden">
+    <div class="card p-5 mb-4">
+      <h2 class="text-base font-semibold text-gray-900 mb-1">🔑 Pair a New Worker PC</h2>
+      <p class="text-xs text-gray-500 mb-3">
+        Generate a one-time pairing code, then run <code class="text-blue-600">OrchardRPAWorker.exe</code> on the new PC and enter the code when prompted. Codes expire after 24 hours.
+      </p>
+      <div class="flex items-center gap-3 flex-wrap">
+        <button onclick="generateCode()" class="btn-primary">Generate Pairing Code</button>
+        <span id="new-code" class="hidden font-mono text-lg tracking-widest bg-blue-50 border border-blue-200 text-blue-700 px-4 py-1.5 rounded select-all"></span>
+      </div>
+      <div id="code-list" class="mt-3 space-y-1"></div>
+    </div>
+
+    <div class="card p-5">
+      <h2 class="text-base font-semibold text-gray-900 mb-1">🖥 Registered Workers</h2>
+      <p class="text-xs text-gray-500 mb-4">Online/offline is heartbeat-driven (updates every 10 s; offline after 30 s of silence). Disabling a worker pauses task pickup without uninstalling.</p>
+      <div id="pc-settings-list" class="space-y-2"></div>
+      <div id="pc-settings-empty" class="text-sm text-gray-400 hidden">No workers registered yet.</div>
+    </div>
+  </div>
+
+  <!-- ═══ LOGS ═══ -->
+  <div id="view-logs" class="hidden">
+    <div class="card p-5">
+      <h2 class="text-base font-semibold text-gray-900 mb-4">📋 Task Logs</h2>
+      <div class="mb-3">
+        <label class="block text-xs text-gray-500 mb-1">Select Task</label>
+        <select id="log-task-select" onchange="loadLogsForSelected()" class="w-full px-3 py-2 text-sm"></select>
+      </div>
+      <div class="mb-3 text-xs text-gray-500 bg-gray-50 rounded px-4 py-3 border border-gray-200">
+        <strong class="text-gray-700">How status is determined:</strong>
+        <code>RkScenarioManager.exe /RUN scenario.rks</code> exits with code
+        <span class="text-green-600 font-mono">0</span> → <span class="text-green-600">success</span>.
+        Any non-zero → <span class="text-red-600">failed</span>. Full stdout/stderr is captured below (live while running).
+      </div>
+      <pre id="log-output" class="bg-gray-900 rounded p-4 text-xs text-green-400 font-mono max-h-[34rem] overflow-auto whitespace-pre-wrap">Select a task above to view its output…</pre>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  Supabase client + auth
+// ═══════════════════════════════════════════════════════════
+const sb = window.supabase.createClient(
+  window.ORCHARD_CONFIG.SUPABASE_URL,
+  window.ORCHARD_CONFIG.SUPABASE_ANON_KEY,
+);
+
+const ONLINE_MS = 30_000;
+const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+let G = { workers:[], scenarios:[], tasks:[], schedules:[], codes:[], scanCmd:null };
+let activeTab = 'dashboard';
+let logTaskId = null, logLines = [];
+
+async function init() {
+  document.getElementById('sched-tz').textContent = TZ;
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) startApp(); else showLogin();
+  sb.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT') location.reload();
+  });
+}
+
+function showLogin() {
+  document.getElementById('login-view').classList.remove('hidden');
+  document.getElementById('app').classList.add('hidden');
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('login-btn');
+  const err = document.getElementById('login-error');
+  btn.disabled = true; err.classList.add('hidden');
+  const { error } = await sb.auth.signInWithPassword({
+    email: document.getElementById('login-email').value.trim(),
+    password: document.getElementById('login-password').value,
+  });
+  btn.disabled = false;
+  if (error) { err.textContent = error.message; err.classList.remove('hidden'); return; }
+  startApp();
+}
+
+async function doLogout() { await sb.auth.signOut(); }
+
+// ═══════════════════════════════════════════════════════════
+//  Data loading + realtime
+// ═══════════════════════════════════════════════════════════
+function setConn(up, label) {
+  const dot = document.getElementById('conn-dot');
+  const lab = document.getElementById('conn-label');
+  dot.className = `w-2 h-2 rounded-full inline-block ${up ? 'bg-green-500 pulse-dot' : 'bg-red-400'}`;
+  lab.textContent = label || (up ? 'Live' : 'Reconnecting…');
+  lab.className = up ? 'text-green-600' : 'text-red-500';
+}
+
+async function fetchAll() {
+  const [w, s, t, sc, pc] = await Promise.all([
+    sb.from('workers').select('*').order('username'),
+    sb.from('scenarios').select('*').order('name'),
+    sb.from('tasks').select('*').order('created_at', { ascending:false }).limit(300),
+    sb.from('schedules').select('*').order('created_at'),
+    sb.from('pairing_codes').select('*').is('used_at', null).gt('expires_at', new Date().toISOString()),
+  ]);
+  if (w.data)  G.workers   = w.data;
+  if (s.data)  G.scenarios = s.data;
+  if (t.data)  G.tasks     = t.data;
+  if (sc.data) G.schedules = sc.data;
+  if (pc.data) G.codes     = pc.data;
+  document.getElementById('last-sync').textContent = new Date().toLocaleTimeString();
+}
+
+let refetchTimer = null;
+function scheduleRefetch() {
+  clearTimeout(refetchTimer);
+  refetchTimer = setTimeout(async () => { await fetchAll(); renderAll(); }, 250);
+}
+
+function subscribeRealtime() {
+  sb.channel('db-changes')
+    .on('postgres_changes', { event:'*', schema:'public', table:'workers'   }, scheduleRefetch)
+    .on('postgres_changes', { event:'*', schema:'public', table:'tasks'     }, scheduleRefetch)
+    .on('postgres_changes', { event:'*', schema:'public', table:'scenarios' }, scheduleRefetch)
+    .on('postgres_changes', { event:'*', schema:'public', table:'schedules' }, scheduleRefetch)
+    .on('postgres_changes', { event:'*', schema:'public', table:'commands'  }, onCommandChange)
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'task_logs' }, onLogInsert)
+    .subscribe((status) => setConn(status === 'SUBSCRIBED'));
+}
+
+function onCommandChange(payload) {
+  const row = payload.new;
+  if (G.scanCmd && row && row.id === G.scanCmd.id) { G.scanCmd = row; renderScan(); }
+}
+
+function onLogInsert(payload) {
+  const row = payload.new;
+  if (row && row.task_id === logTaskId) {
+    logLines.push(row.line);
+    renderLogView();
+  }
+}
+
+async function startApp() {
+  document.getElementById('login-view').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  await fetchAll();
+  renderAll();
+  subscribeRealtime();
+  // Belt-and-braces: recompute online window + catch missed events
+  setInterval(async () => { await fetchAll(); renderAll(); }, 15_000);
+  setInterval(renderAll, 5_000); // re-render for the 30 s online cutoff
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════
+function isOnline(w) { return w.last_seen && Date.now() - new Date(w.last_seen) < ONLINE_MS; }
+function firstOnlineWorker() { return G.workers.find(isOnline) || G.workers[0] || null; }
+function workerById(id) { return G.workers.find(w => w.id === id); }
+function workerName(id) { const w = workerById(id); return w ? (w.display_name || w.username) : '—'; }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+const SCFG = {
+  pending: { icon:'⏳', bg:'bg-yellow-50', text:'text-yellow-700', border:'border-yellow-200' },
+  running: { icon:'▶',  bg:'bg-blue-50',   text:'text-blue-700',   border:'border-blue-200', spin:true },
+  success: { icon:'✅', bg:'bg-green-50',  text:'text-green-700',  border:'border-green-200' },
+  failed:  { icon:'❌', bg:'bg-red-50',    text:'text-red-700',    border:'border-red-200' },
+  stopped: { icon:'⛔', bg:'bg-gray-100',  text:'text-gray-600',   border:'border-gray-300' },
+};
+
+// Flicker-free keyed DOM diffing (same as the old dashboard)
+function diffList(container, items) {
+  const existing = new Map([...container.children].map(el => [el.dataset.key, el]));
+  const wanted = new Set(items.map(i => i.key));
+  for (const [k, el] of existing) if (!wanted.has(k)) el.remove();
+  let ref = null;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const { key, html } = items[i];
+    let el = existing.get(key);
+    if (!el) {
+      el = document.createElement('div');
+      el.dataset.key = key; el.innerHTML = html; el.classList.add('fade-in');
+      container.insertBefore(el, ref);
+    } else {
+      if (el._diffHtml !== html) { el.innerHTML = html; el._diffHtml = html; }
+      if (el.nextSibling !== ref) container.insertBefore(el, ref);
+    }
+    ref = el;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PC Cards
+// ═══════════════════════════════════════════════════════════
+function diffPCCards() {
+  const grid = document.getElementById('pc-cards');
+  if (!G.workers.length) {
+    grid.innerHTML = `<div class="col-span-3 text-center py-10 text-gray-400 text-sm">
+      No workers yet. Go to <strong class="text-gray-600">Settings</strong>, generate a pairing code, and run
+      <code class="text-gray-600">OrchardRPAWorker.exe</code> on each PC.</div>`;
+    return;
+  }
+  diffList(grid, G.workers.map(w => {
+    const online = isOnline(w);
+    const runningTask = G.tasks.find(t => t.worker_id === w.id && t.status === 'running');
+    const isRunning = runningTask || (online && w.rk_running);
+    const borderC = isRunning ? '#0078d4' : online ? '#d1d5db' : '#e5e7eb';
+    const dot = isRunning ? 'bg-blue-500 spin' : online ? 'bg-green-500 pulse-dot' : 'bg-gray-300';
+    const label = runningTask ? runningTask.scenario_name
+                : (online && w.rk_running) ? 'Running Outside App'
+                : online ? (w.enabled ? 'Idle' : 'Disabled') : 'Offline';
+    const seen = w.last_seen ? new Date(w.last_seen).toLocaleTimeString() : 'never';
+    const textCls = isRunning ? 'text-blue-700' : online ? 'text-gray-700' : 'text-gray-400';
+    return { key: w.id, html: `
+      <div class="bg-white rounded border p-4 h-full" style="border-color:${borderC};transition:border-color .3s;box-shadow:0 1px 3px rgba(0,0,0,.06)">
+        <div class="flex items-center justify-between mb-1.5">
+          <div><p class="font-semibold text-gray-900 text-sm">${esc(w.display_name || w.username)}</p>
+               <p class="text-xs text-gray-400 font-mono">${esc(w.username)}@${esc(w.hostname || '?')}</p></div>
+          <span class="w-2.5 h-2.5 rounded-full ${dot} flex-shrink-0"></span>
+        </div>
+        <p class="text-xs truncate ${textCls} mb-1.5">${esc(label)}</p>
+        ${runningTask ? `<div class="h-1 rounded-full bg-gray-200 overflow-hidden">
+          <div class="h-full w-1/3 rounded-full bar-run" style="background:#0078d4"></div></div>` : ''}
+        <p class="text-xs text-gray-300 mt-1.5">Last seen ${seen}${w.app_version ? ' · v' + esc(w.app_version) : ''}</p>
+      </div>` };
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Task Queue
+// ═══════════════════════════════════════════════════════════
+let collapsedGroups = new Set();
+function toggleTaskGroup(g) {
+  collapsedGroups.has(g) ? collapsedGroups.delete(g) : collapsedGroups.add(g);
+  diffTasks();
+}
+
+function getTaskGroup(dateStr) {
+  if (!dateStr) return 'Unknown';
+  const d = new Date(dateStr), now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const taskDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((today - taskDate) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays <= 7) return 'Previous Week';
+  if (diffDays <= 30) return 'Previous Month';
+  return 'Older';
+}
+
+function diffTasks() {
+  const filter = document.getElementById('filter-status').value;
+  let tasks = G.tasks;
+  if (filter) tasks = tasks.filter(t => t.status === filter);
+
+  const el = document.getElementById('task-list');
+  const empty = document.getElementById('task-empty');
+  if (!tasks.length) { el.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+
+  const groups = ['Today','Yesterday','Previous Week','Previous Month','Older','Unknown'];
+  const byGroup = Object.fromEntries(groups.map(g => [g, []]));
+  for (const t of tasks) byGroup[getTaskGroup(t.created_at)].push(t);
+
+  const items = [];
+  for (const g of groups) {
+    if (!byGroup[g].length) continue;
+    const chevron = collapsedGroups.has(g) ? '▶' : '▼';
+    items.push({ key: 'group-' + g.replace(/\s+/g,'-'), html: `
+      <div onclick="toggleTaskGroup('${g}')" class="flex items-center justify-between px-5 py-2 bg-gray-50 text-xs font-semibold text-gray-600 cursor-pointer hover:bg-gray-100 transition-colors border-y border-gray-100">
+        <span>${chevron} ${g}</span>
+        <span class="bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">${byGroup[g].length}</span>
+      </div>` });
+    if (collapsedGroups.has(g)) continue;
+
+    for (const t of byGroup[g]) {
+      const cfg = SCFG[t.status] || SCFG.pending;
+      const ico = cfg.spin
+        ? `<svg class="w-4 h-4 spin text-blue-400" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="30 70" stroke-linecap="round"/></svg>`
+        : cfg.icon;
+      const dt = t.created_at ? new Date(t.created_at).toLocaleString() : '';
+      const dur = t.started_at && t.finished_at
+        ? ((new Date(t.finished_at) - new Date(t.started_at)) / 1000).toFixed(1) + 's' : '';
+      const exitBadge = (t.exit_code != null && t.status !== 'running')
+        ? `<span class="text-xs font-mono ${t.exit_code === 0 ? 'text-green-600' : 'text-red-600'}">exit&nbsp;${t.exit_code}</span>` : '';
+      const stop = ['running','pending'].includes(t.status)
+        ? `<button onclick="stopTask('${t.id}')" class="text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 px-3 py-1 rounded cursor-pointer">Stop</button>` : '';
+      const retry = ['success','failed','stopped'].includes(t.status)
+        ? `<button onclick="retryTask('${t.id}')" class="text-xs text-orange-600 border border-orange-200 bg-orange-50 hover:bg-orange-100 px-3 py-1 rounded cursor-pointer">Retry</button>` : '';
+      items.push({ key: t.id, html: `
+        <div class="flex items-center gap-4 px-5 py-2.5 hover:bg-gray-50 transition-colors">
+          <div class="w-5 flex-shrink-0 text-center text-sm">${ico}</div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium truncate text-gray-900">${esc(t.scenario_name)}</p>
+            <p class="text-xs text-gray-400">${esc(workerName(t.worker_id))} · ${dt}${dur ? ' · ' + dur : ''}</p>
+            ${t.error ? `<p class="text-xs text-red-500 mt-0.5 truncate">${esc(t.error)}</p>` : ''}
+          </div>
+          ${exitBadge}
+          <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded ${cfg.bg} ${cfg.text} ${cfg.border} border">${t.status}</span>
+          <div class="flex gap-2 flex-shrink-0">${stop}${retry}</div>
+        </div>` });
+    }
+  }
+  diffList(el, items);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Scenario Library
+// ═══════════════════════════════════════════════════════════
+function diffScenarios() {
+  const list = document.getElementById('scenario-list');
+  const empty = document.getElementById('scenario-empty');
+  document.getElementById('scenario-count').textContent =
+    G.scenarios.length + ' scenario' + (G.scenarios.length !== 1 ? 's' : '');
+  if (!G.scenarios.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+
+  diffList(list, G.scenarios.map(s => {
+    const runs = G.tasks.filter(t => t.scenario_name === s.name).length;
+    const last = G.tasks.find(t => t.scenario_name === s.name);
+    const lc = last ? (SCFG[last.status] || SCFG.pending) : null;
+    const lastBadge = last ? `<span class="text-xs px-2 py-0.5 rounded-full ${lc.bg} ${lc.text} border ${lc.border}">${last.status}</span>` : '';
+    const pathLine = s.path
+      ? `<span class="text-blue-600">${esc(s.path)}</span>`
+      : `C:\\Users\\<span class="text-blue-600">{USERNAME}</span>\\Orchard Medical Management\\Automations-PatriotPay - Documents\\Scenarios\\<span class="text-green-600">${esc(s.name)}.rks</span>`;
+    return { key: s.id, html: `
+      <div class="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors group">
+        <div class="w-7 h-7 rounded bg-blue-50 flex items-center justify-center flex-shrink-0 text-sm border border-blue-100">📄</div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-900">${esc(s.name)}</p>
+          <p class="text-xs text-gray-400 font-mono mt-0.5 truncate">${pathLine}</p>
+        </div>
+        ${lastBadge}
+        <span class="text-xs text-gray-400">${runs} run${runs !== 1 ? 's' : ''}</span>
+        <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onclick="quickRun('${s.id}')" class="btn-primary text-xs px-3 py-1">Run</button>
+          <button onclick="removeScenario('${s.id}')" class="text-xs text-red-500 hover:text-red-700 px-2 py-1 cursor-pointer">Remove</button>
+        </div>
+      </div>` };
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Scan panel
+// ═══════════════════════════════════════════════════════════
+function renderScan() {
+  const btn = document.getElementById('scan-btn'); if (!btn) return;
+  const label = document.getElementById('scan-btn-label');
+  const result = document.getElementById('scan-result');
+  const hint = document.getElementById('scan-worker-hint');
+  const cmd = G.scanCmd;
+
+  const w = firstOnlineWorker();
+  hint.textContent = w ? `Will use: ${w.display_name || w.username} (${isOnline(w) ? 'online' : 'offline — runs when back online'})`
+                       : 'No workers registered yet';
+
+  if (cmd && ['pending','acked'].includes(cmd.status)) {
+    btn.disabled = true;
+    label.textContent = 'Scanning…';
+    result.classList.add('hidden');
+    return;
+  }
+  btn.disabled = false;
+  label.textContent = 'Fetch / Update List';
+  if (!cmd) { result.classList.add('hidden'); return; }
+
+  if (cmd.status === 'done') {
+    const r = cmd.result || {};
+    result.className = 'mt-4 rounded px-4 py-3 text-sm bg-green-50 border border-green-200 text-green-800';
+    result.innerHTML = `
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <p class="font-semibold">✅ Sync complete — ${r.total ?? 0} file${(r.total ?? 0) !== 1 ? 's' : ''} in folder</p>
+        <button onclick="G.scanCmd=null;renderScan()" class="text-xs text-gray-400 hover:text-gray-600 cursor-pointer">Dismiss</button>
+      </div>`;
+    result.classList.remove('hidden');
+  } else if (cmd.status === 'failed') {
+    const r = cmd.result || {};
+    result.className = 'mt-4 rounded px-4 py-3 text-sm bg-red-50 border border-red-200 text-red-800';
+    result.innerHTML = `
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <p class="font-semibold">❌ Scan failed</p>
+        <button onclick="G.scanCmd=null;renderScan()" class="text-xs text-gray-400 hover:text-gray-600 cursor-pointer">Dismiss</button>
+      </div>
+      <p class="text-xs text-red-600 font-mono mt-1">${esc(r.error || 'Unknown error')}</p>`;
+    result.classList.remove('hidden');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Selects / Settings / Schedules / Logs
+// ═══════════════════════════════════════════════════════════
+function refreshSelects() {
+  const pcOpts = G.workers.map(w =>
+    `<option value="${w.id}">${esc(w.display_name || w.username)}${isOnline(w) ? '' : ' (offline)'}</option>`).join('');
+  const scenOpts = '<option value="">— Select —</option>' +
+    G.scenarios.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  const selPc = document.getElementById('sel-pc');
+  if (selPc._last !== pcOpts) { const v = selPc.value; selPc.innerHTML = pcOpts; selPc._last = pcOpts; if (v) selPc.value = v; }
+  const selScen = document.getElementById('sel-scenario');
+  if (selScen._last !== scenOpts) { const v = selScen.value; selScen.innerHTML = scenOpts; selScen._last = scenOpts; if (v) selScen.value = v; }
+}
+
+function diffSettings() {
+  const cont = document.getElementById('pc-settings-list');
+  const empty = document.getElementById('pc-settings-empty');
+  if (!G.workers.length) { cont.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+
+  diffList(cont, G.workers.map(w => {
+    const online = isOnline(w);
+    const lastSeen = w.last_seen ? new Date(w.last_seen).toLocaleString() : 'Never';
+    return { key: w.id, html: `
+      <div class="flex items-center gap-4 bg-gray-50 border border-gray-200 rounded px-4 py-3">
+        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 ${online ? 'bg-green-500 pulse-dot' : 'bg-gray-300'}"></span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-900">${esc(w.display_name || w.username)}</p>
+          <p class="text-xs text-gray-400 font-mono">${esc(w.username)}@${esc(w.hostname || '?')}${w.app_version ? ' · v' + esc(w.app_version) : ''}</p>
+          <p class="text-xs text-gray-400 mt-0.5">Last seen: ${lastSeen}</p>
+        </div>
+        <span class="text-xs font-medium ${online ? 'text-green-600' : 'text-gray-400'}">${online ? 'Online' : 'Offline'}</span>
+        <div class="flex gap-2 flex-shrink-0">
+          <button onclick="toggleWorker('${w.id}', ${!w.enabled})" class="text-xs px-3 py-1 rounded border cursor-pointer ${w.enabled ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}">${w.enabled ? 'Enabled' : 'Disabled'}</button>
+          ${online ? `<button onclick="sendWorkerCmd('${w.id}','restart')" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 px-3 py-1 rounded cursor-pointer">Restart</button>
+          <button onclick="sendWorkerCmd('${w.id}','shutdown')" class="text-xs text-orange-600 border border-orange-200 bg-orange-50 px-3 py-1 rounded cursor-pointer">Kill</button>` : ''}
+          <button onclick="removeWorker('${w.id}')" class="text-xs text-red-500 hover:text-red-700 cursor-pointer">Remove</button>
+        </div>
+      </div>` };
+  }));
+}
+
+function diffSchedules() {
+  const list = document.getElementById('schedule-list');
+  const empty = document.getElementById('schedule-empty');
+  if (!G.schedules.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+
+  diffList(list, G.schedules.map(s => {
+    const days = (s.days || []).map(d => DAY_NAMES[d]).join(', ') || 'No days';
+    const last = s.last_fired_at ? new Date(s.last_fired_at).toLocaleString() : 'Never';
+    return { key: s.id, html: `
+      <div class="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors">
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-900">${esc(s.name)}</p>
+          <p class="text-xs text-gray-500 mt-0.5">${days} at <span class="font-mono text-blue-600">${String(s.run_time).slice(0,5)}</span> <span class="text-gray-400">(${esc(s.timezone)})</span></p>
+          <p class="text-xs text-gray-400 mt-0.5">Last run: ${last}${s.last_count != null ? ` · ${s.last_count} task(s)` : ''}</p>
+        </div>
+        <button onclick="toggleSched('${s.id}', ${!s.enabled})" class="text-xs px-3 py-1 rounded flex-shrink-0 border cursor-pointer ${s.enabled ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}">${s.enabled ? 'Enabled' : 'Disabled'}</button>
+        <button onclick="deleteSched('${s.id}')" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0 cursor-pointer">Delete</button>
+      </div>` };
+  }));
+}
+
+function renderCodes() {
+  const el = document.getElementById('code-list');
+  el.innerHTML = G.codes.map(c => `
+    <div class="flex items-center gap-3 text-xs text-gray-500">
+      <span class="font-mono text-gray-700 tracking-widest">${esc(c.code)}</span>
+      <span>expires ${new Date(c.expires_at).toLocaleString()}</span>
+      <button onclick="revokeCode('${esc(c.code)}')" class="text-red-400 hover:text-red-600 cursor-pointer">revoke</button>
+    </div>`).join('');
+}
+
+function refreshLogSelect() {
+  const sel = document.getElementById('log-task-select');
+  const prev = sel.value;
+  const next = '<option value="">— Select task —</option>' +
+    G.tasks.map(t => `<option value="${t.id}">${esc(t.scenario_name)} (${t.status}) — ${esc(workerName(t.worker_id))}</option>`).join('');
+  if (sel._last !== next) { sel.innerHTML = next; sel._last = next; }
+  if (prev) sel.value = prev;
+}
+
+async function loadLogsForSelected() {
+  logTaskId = document.getElementById('log-task-select').value || null;
+  logLines = [];
+  if (logTaskId) {
+    const { data } = await sb.from('task_logs').select('line')
+      .eq('task_id', logTaskId).order('seq');
+    logLines = (data || []).map(r => r.line);
+  }
+  renderLogView();
+}
+
+function renderLogView() {
+  const out = document.getElementById('log-output');
+  if (!logTaskId) { out.textContent = 'Select a task above to view its output…'; return; }
+  const text = logLines.length ? logLines.join('\n') : 'No logs yet.';
+  if (out._last !== text) { out.textContent = text; out.scrollTop = out.scrollHeight; out._last = text; }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Batch progress (Run All)
+// ═══════════════════════════════════════════════════════════
+function diffBatchProgress() {
+  const wrap = document.getElementById('batch-progress'); if (!wrap) return;
+  const batchTasks = G.tasks.filter(t => t.batch_id);
+  const latestId = batchTasks.length ? batchTasks[0].batch_id : null;
+  const batch = latestId ? G.tasks.filter(t => t.batch_id === latestId) : [];
+
+  const n = s => batch.filter(t => t.status === s).length;
+  const pending = n('pending'), running = n('running'), success = n('success'),
+        failed = n('failed'), stopped = n('stopped');
+  const total = batch.length, done = success + failed + stopped;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const isActive = running > 0 || (total > 0 && done < total);
+
+  wrap.classList.toggle('hidden', !total);
+  document.getElementById('stop-all-btn').classList.toggle('hidden', !isActive);
+  document.getElementById('batch-label').textContent =
+    isActive ? `${done} / ${total} complete` : (total ? `Batch done — ${success} succeeded${failed ? `, ${failed} failed` : ''}` : '');
+  document.getElementById('batch-pct').textContent = total ? pct + '%' : '';
+  document.getElementById('batch-bar').style.width = pct + '%';
+  document.getElementById('batch-pending').textContent = pending ? `⏳ ${pending} pending` : '';
+  document.getElementById('batch-running').textContent = running ? `▶ ${running} running` : '';
+  document.getElementById('batch-completed').textContent = success ? `✅ ${success} succeeded` : '';
+  document.getElementById('batch-failed').textContent = failed ? `❌ ${failed} failed` : '';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Master render
+// ═══════════════════════════════════════════════════════════
+function renderAll() {
+  diffPCCards();
+  diffBatchProgress();
+  diffTasks();
+  diffScenarios();
+  refreshSelects();
+  diffSettings();
+  diffSchedules();
+  renderCodes();
+  refreshLogSelect();
+  renderScan();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Actions
+// ═══════════════════════════════════════════════════════════
+async function act(promise, okMsg) {
+  const { error } = await promise;
+  if (error) { alert('Error: ' + error.message); return false; }
+  scheduleRefetch();
+  return true;
+}
+
+// -- Run --
+async function submitTask() {
+  const scenId = document.getElementById('sel-scenario').value;
+  const workerId = document.getElementById('sel-pc').value;
+  if (!scenId) return alert('Select a scenario.');
+  if (!workerId) return alert('Select a PC.');
+  const sc = G.scenarios.find(s => s.id === scenId);
+  await act(sb.from('tasks').insert({
+    scenario_name: sc.name, scenario_path: sc.path, worker_id: workerId, source: 'manual',
+  }));
+}
+
+async function quickRun(scenId) {
+  const sc = G.scenarios.find(s => s.id === scenId);
+  const w = firstOnlineWorker();
+  if (!w) return alert('No workers registered.');
+  if (await act(sb.from('tasks').insert({
+    scenario_name: sc.name, scenario_path: sc.path, worker_id: w.id, source: 'manual',
+  }))) tab('dashboard');
+}
+
+async function runAll() {
+  if (!G.workers.some(isOnline)) return alert('No online workers.\nBring at least one worker online first.');
+  if (!G.scenarios.length) return alert('No scenarios in the library.\nFetch or add scenarios first.');
+  const { data, error } = await sb.rpc('dispatch_run_all', { p_source: 'run_all' });
+  if (error) return alert('Error: ' + error.message);
+  scheduleRefetch();
+}
+
+// -- Stop / retry / clear --
+async function stopTask(id) {
+  const t = G.tasks.find(t => t.id === id);
+  if (!t) return;
+  if (t.status === 'pending') {
+    await act(sb.from('tasks').update({
+      status: 'stopped', error: 'Cancelled from dashboard',
+      finished_at: new Date().toISOString(),
+    }).eq('id', id).eq('status', 'pending'));
+  } else if (t.status === 'running') {
+    await act(sb.from('commands').insert({
+      worker_id: t.worker_id, type: 'stop_task', payload: { task_id: id },
+    }));
+  }
+}
+
+async function stopAll() {
+  if (!confirm('Stop all pending and running tasks in the latest batch?')) return;
+  const batchTasks = G.tasks.filter(t => t.batch_id);
+  const latestId = batchTasks.length ? batchTasks[0].batch_id : null;
+  if (!latestId) return;
+  await sb.from('tasks').update({
+    status: 'stopped', error: 'Cancelled from dashboard', finished_at: new Date().toISOString(),
+  }).eq('batch_id', latestId).eq('status', 'pending');
+  const running = G.tasks.filter(t => t.batch_id === latestId && t.status === 'running');
+  for (const t of running) {
+    await sb.from('commands').insert({ worker_id: t.worker_id, type: 'stop_task', payload: { task_id: t.id } });
+  }
+  scheduleRefetch();
+}
+
+async function retryTask(id) {
+  await act(sb.from('tasks').update({
+    status: 'pending', started_at: null, finished_at: null,
+    error: null, exit_code: null, resolved_path: null,
+  }).eq('id', id));
+}
+
+async function clearFinished() {
+  await act(sb.from('tasks').delete().in('status', ['success', 'failed', 'stopped']));
+}
+
+// -- Scenarios --
+async function requestScan() {
+  const w = firstOnlineWorker();
+  if (!w) return alert('No worker PCs registered.\nPair at least one machine first.');
+  if (!isOnline(w) && !confirm(`No workers are online right now.\nSend the request anyway? It will run when a worker comes back online.`)) return;
+  const { data, error } = await sb.from('commands')
+    .insert({ worker_id: w.id, type: 'scan' }).select().single();
+  if (error) return alert('Error: ' + error.message);
+  G.scanCmd = data;
+  renderScan();
+}
+
+async function addScenario() {
+  const raw = document.getElementById('inp-scenario-name').value.trim();
+  const name = raw.replace(/\.rks$/i, '').trim();
+  const path = document.getElementById('inp-scenario-path').value.trim() || null;
+  if (!name) return alert('Enter a scenario name.');
+  if (G.scenarios.find(s => s.name.toLowerCase() === name.toLowerCase()))
+    return alert(`"${name}" already exists.`);
+  if (await act(sb.from('scenarios').insert({ name, path }))) {
+    document.getElementById('inp-scenario-name').value = '';
+    document.getElementById('inp-scenario-path').value = '';
+  }
+}
+
+async function removeScenario(id) {
+  const s = G.scenarios.find(s => s.id === id);
+  if (!s || !confirm(`Remove "${s.name}" from the library?`)) return;
+  await act(sb.from('scenarios').delete().eq('id', id));
+}
+
+// -- Workers --
+async function toggleWorker(id, enabled) {
+  await act(sb.from('workers').update({ enabled }).eq('id', id));
+}
+
+async function sendWorkerCmd(id, type) {
+  const w = workerById(id);
+  const verb = type === 'shutdown' ? 'shut down' : type;
+  if (!confirm(`Send ${verb} to "${w.display_name || w.username}"?`)) return;
+  await act(sb.from('commands').insert({ worker_id: id, type }));
+}
+
+async function removeWorker(id) {
+  const w = workerById(id);
+  if (!confirm(`Remove "${w.display_name || w.username}"?\nThis deletes the worker and its task history. Uninstall the exe on that PC too, or it will error on next start.`)) return;
+  await act(sb.from('workers').delete().eq('id', id));
+}
+
+// -- Pairing codes --
+async function generateCode() {
+  const code = Array.from(crypto.getRandomValues(new Uint8Array(8)),
+    b => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32]).join('');
+  const expires = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const { error } = await sb.from('pairing_codes').insert({ code, expires_at: expires });
+  if (error) return alert('Error: ' + error.message);
+  const el = document.getElementById('new-code');
+  el.textContent = code;
+  el.classList.remove('hidden');
+  scheduleRefetch();
+}
+
+async function revokeCode(code) {
+  await act(sb.from('pairing_codes').delete().eq('code', code));
+}
+
+// -- Schedules --
+async function addSchedule() {
+  const name = document.getElementById('sched-name').value.trim();
+  const time = document.getElementById('sched-time').value;
+  const days = [...document.querySelectorAll('.sched-day:checked')].map(cb => parseInt(cb.value));
+  if (!name) return alert('Enter a schedule name.');
+  if (!days.length) return alert('Select at least one day of the week.');
+  if (!time) return alert('Set a time.');
+  if (await act(sb.from('schedules').insert({
+    name, kind: 'run_all', days, run_time: time, timezone: TZ, enabled: true,
+  }))) {
+    document.getElementById('sched-name').value = '';
+    document.getElementById('sched-time').value = '00:00';
+    document.querySelectorAll('.sched-day').forEach(cb => cb.checked = false);
+  }
+}
+
+async function toggleSched(id, enabled) {
+  await act(sb.from('schedules').update({ enabled }).eq('id', id));
+}
+
+async function deleteSched(id) {
+  if (!confirm('Delete this schedule?')) return;
+  await act(sb.from('schedules').delete().eq('id', id));
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Tabs
+// ═══════════════════════════════════════════════════════════
+function tab(name) {
+  activeTab = name;
+  ['dashboard','scenarios','schedules','settings','logs'].forEach(t => {
+    document.getElementById('view-' + t).classList.toggle('hidden', t !== name);
+    const btn = document.getElementById('tab-' + t);
+    btn.classList.toggle('tab-active', t === name);
+  });
+  if (name === 'logs') { refreshLogSelect(); renderLogView(); }
+}
+
+init();
+</script>
+</body>
+</html>

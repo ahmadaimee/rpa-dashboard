@@ -1,0 +1,3 @@
+supabase>=2.4
+keyboard>=0.13
+pyinstaller>=6.0

@@ -1,0 +1,166 @@
+"""Supabase client wrapper — auth, retries, and all table operations.
+
+Every call goes through `_safe()`: network drops or auth expiry must never
+crash the worker loop (mirrors the old worker's tolerance of state.json
+contention). On auth errors we re-sign-in once and retry.
+"""
+import logging
+import time
+from datetime import datetime, timezone
+
+from supabase import create_client
+
+log = logging.getLogger("worker")
+
+
+def utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class Cloud:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.client = create_client(cfg.supabase_url, cfg.anon_key)
+        self._signed_in = False
+
+    # ── auth ────────────────────────────────────────────────
+    def sign_in(self):
+        self.client.auth.sign_in_with_password(
+            {"email": self.cfg.email, "password": self.cfg.password}
+        )
+        self._signed_in = True
+        log.info("Signed in to Supabase as worker %s", self.cfg.worker_id)
+
+    def _safe(self, fn, what: str, default=None):
+        """Run a supabase call; on failure try one re-auth + retry, else default."""
+        for attempt in (1, 2):
+            try:
+                if not self._signed_in:
+                    self.sign_in()
+                return fn()
+            except Exception as e:
+                msg = str(e)
+                log.debug("%s failed (attempt %d): %s", what, attempt, msg)
+                if attempt == 1:
+                    self._signed_in = False
+                    time.sleep(1)
+        return default
+
+    # ── workers ─────────────────────────────────────────────
+    def heartbeat(self, status: str, rk_running: bool, app_version: str):
+        self._safe(
+            lambda: self.client.table("workers").update({
+                "last_seen": utcnow(),
+                "status": status,
+                "rk_running": rk_running,
+                "app_version": app_version,
+            }).eq("id", self.cfg.worker_id).execute(),
+            "heartbeat",
+        )
+
+    def set_status(self, status: str):
+        self._safe(
+            lambda: self.client.table("workers").update(
+                {"status": status, "last_seen": utcnow()}
+            ).eq("id", self.cfg.worker_id).execute(),
+            "set_status",
+        )
+
+    def worker_enabled(self) -> bool:
+        res = self._safe(
+            lambda: self.client.table("workers").select("enabled")
+                .eq("id", self.cfg.worker_id).single().execute(),
+            "worker_enabled",
+        )
+        if res is None:
+            return True  # network blip — keep working
+        return bool(res.data.get("enabled", True))
+
+    # ── tasks ───────────────────────────────────────────────
+    def claim_next_task(self) -> dict | None:
+        """Atomically claim the oldest pending task for this worker."""
+        res = self._safe(
+            lambda: self.client.table("tasks").select("*")
+                .eq("worker_id", self.cfg.worker_id)
+                .eq("status", "pending")
+                .order("created_at").limit(1).execute(),
+            "next_pending",
+        )
+        if not res or not res.data:
+            return None
+        task = res.data[0]
+        claimed = self._safe(
+            lambda: self.client.table("tasks").update({
+                "status": "running", "started_at": utcnow(),
+            }).eq("id", task["id"]).eq("status", "pending").execute(),
+            "claim_task",
+        )
+        if claimed and claimed.data:
+            return claimed.data[0] | {"scenario_name": task["scenario_name"],
+                                       "scenario_path": task.get("scenario_path")}
+        return None
+
+    def update_task(self, task_id: str, fields: dict):
+        self._safe(
+            lambda: self.client.table("tasks").update(fields)
+                .eq("id", task_id).execute(),
+            "update_task",
+        )
+
+    def task_status(self, task_id: str) -> str | None:
+        res = self._safe(
+            lambda: self.client.table("tasks").select("status")
+                .eq("id", task_id).single().execute(),
+            "task_status",
+        )
+        return res.data.get("status") if res and res.data else None
+
+    # ── logs ────────────────────────────────────────────────
+    def insert_logs(self, rows: list[dict]):
+        if not rows:
+            return
+        self._safe(
+            lambda: self.client.table("task_logs").insert(rows).execute(),
+            "insert_logs",
+        )
+
+    # ── commands ────────────────────────────────────────────
+    def pending_commands(self) -> list[dict]:
+        res = self._safe(
+            lambda: self.client.table("commands").select("*")
+                .eq("worker_id", self.cfg.worker_id)
+                .eq("status", "pending")
+                .order("created_at").execute(),
+            "pending_commands",
+        )
+        return res.data if res and res.data else []
+
+    def ack_command(self, cmd_id: str):
+        self._safe(
+            lambda: self.client.table("commands").update(
+                {"status": "acked", "acked_at": utcnow()}
+            ).eq("id", cmd_id).execute(),
+            "ack_command",
+        )
+
+    def finish_command(self, cmd_id: str, ok: bool = True, result: dict | None = None):
+        self._safe(
+            lambda: self.client.table("commands").update({
+                "status": "done" if ok else "failed",
+                "finished_at": utcnow(),
+                "result": result or {},
+            }).eq("id", cmd_id).execute(),
+            "finish_command",
+        )
+
+    # ── scenarios ───────────────────────────────────────────
+    def upsert_scenarios(self, names: list[str]):
+        now = utcnow()
+        rows = [{"name": n, "reported_by": self.cfg.worker_id, "last_seen_at": now}
+                for n in names]
+        if rows:
+            self._safe(
+                lambda: self.client.table("scenarios")
+                    .upsert(rows, on_conflict="name").execute(),
+                "upsert_scenarios",
+            )
