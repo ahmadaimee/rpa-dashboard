@@ -1272,8 +1272,7 @@ function renderCompanies() {
   document.getElementById('release-card').classList.toggle('hidden', !isSuper);
   const staffCo = document.getElementById('staff-co');
   const staffOpts = '<option value="">— Select —</option>' +
-    G.companies.map(c => `<option value="${esc(c.slug)}">${esc(c.name)}</option>`).join('') +
-    '<option value="__super__">⭐ Super Admin (all companies)</option>';
+    G.companies.map(c => `<option value="${esc(c.slug)}">${esc(c.name)}</option>`).join('');
   if (staffCo._last !== staffOpts) { staffCo.innerHTML = staffOpts; staffCo._last = staffOpts; }
   const wrap = document.getElementById('co-switch-wrap');
   wrap.classList.toggle('hidden', !isSuper || !G.companies.length);
@@ -1312,12 +1311,9 @@ async function inviteStaff() {
   const result = document.getElementById('staff-result');
   const btn = document.getElementById('staff-btn');
   if (!email) return alert('Enter an email.');
-  if (!company) return alert('Select a company (or Super Admin).');
-  const isSuper = company === '__super__';
-  if (isSuper && !confirm('A Super Admin gets full access to ALL companies\n(including companies, staff and releases). Continue?')) return;
+  if (!company) return alert('Select a company.');
   btn.disabled = true;
-  const body = isSuper ? { email, super: true } : { email, company };
-  const { data, error } = await sb.functions.invoke('invite-admin', { body });
+  const { data, error } = await sb.functions.invoke('invite-admin', { body: { email, company } });
   btn.disabled = false;
   if (error || data?.error) {
     result.className = 'mt-3 rounded px-4 py-3 text-sm bg-red-50 border border-red-200 text-red-800';
@@ -1327,7 +1323,7 @@ async function inviteStaff() {
     result.innerHTML = `✅ Login created — share these details with the staff member (the password will not be shown again):<br>
       <span class="font-mono text-gray-800">Email: ${esc(data.email)}</span><br>
       <span class="font-mono text-gray-800 select-all">Password: ${esc(data.password)}</span><br>
-      <span class="text-xs text-green-700">${data.company ? 'Company: ' + esc(coName(data.company)) : 'Role: Super Admin (all companies)'} · Sign in at this dashboard's URL · after first login, use "Change password" to set your own password.</span>`;
+      <span class="text-xs text-green-700">Company: ${esc(coName(data.company))} · Sign in at this dashboard's URL · after first login, use "Change password" to set your own password.</span>`;
     document.getElementById('staff-email').value = '';
   }
 }

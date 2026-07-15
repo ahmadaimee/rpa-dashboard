@@ -41,15 +41,11 @@ Deno.serve(async (req) => {
   }
   const email = (body.email ?? "").trim().toLowerCase();
   const company = (body.company ?? "").trim();
-  const superAdmin = body.super === true || body.super === "true";
-  if (!email) return json({ error: "email is required" }, 400);
-  if (!company && !superAdmin) return json({ error: "company is required" }, 400);
+  if (!email || !company) return json({ error: "email and company are required" }, 400);
 
-  if (!superAdmin) {
-    const { data: co } = await service.from("companies")
-      .select("slug").eq("slug", company).maybeSingle();
-    if (!co) return json({ error: `Unknown company: ${company}` }, 400);
-  }
+  const { data: co } = await service.from("companies")
+    .select("slug").eq("slug", company).maybeSingle();
+  if (!co) return json({ error: `Unknown company: ${company}` }, 400);
 
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
   const password = Array.from(crypto.getRandomValues(new Uint8Array(14)),
@@ -59,9 +55,9 @@ Deno.serve(async (req) => {
     email,
     password,
     email_confirm: true,
-    app_metadata: superAdmin ? {} : { company },
+    app_metadata: { company },
   });
   if (error) return json({ error: error.message }, 500);
 
-  return json({ email, password, company: superAdmin ? null : company });
+  return json({ email, password, company });
 });
