@@ -63,16 +63,38 @@ def check_and_apply(cloud: Cloud, current_version: str) -> bool:
     # the batch at all (caused the v1.2.0 update hang).
     sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
     bat = update_dir / "apply_update.bat"
+    ulog = update_dir / "update.log"
+    # Logged, bounded (no infinite waitloop on PID reuse), retried copy.
     bat.write_text(f"""@echo off
+set N=0
+echo [%date% %time%] update bat started, waiting for pid {os.getpid()} >> "{ulog}"
 :waitloop
+set /a N+=1
+if %N% GTR 60 goto swap
 "{sys32}\\tasklist.exe" /FI "PID eq {os.getpid()}" /NH | "{sys32}\\findstr.exe" /C:"{os.getpid()}" >nul
 if not errorlevel 1 (
   "{sys32}\\ping.exe" -n 2 127.0.0.1 >nul
   goto waitloop
 )
-copy /y "{new_exe}" "{target}" >nul
-del "{new_exe}" >nul 2>&1
-"{sys32}\\schtasks.exe" /run /tn "{TASK_NAME}" >nul 2>&1 || start "" "{target}" --background
+:swap
+set N=0
+:copyloop
+set /a N+=1
+copy /y "{new_exe}" "{target}" >nul 2>>"{ulog}"
+if errorlevel 1 (
+  echo [%date% %time%] copy attempt %N% failed >> "{ulog}"
+  if %N% LSS 5 ("{sys32}\\ping.exe" -n 3 127.0.0.1 >nul & goto copyloop)
+  echo [%date% %time%] giving up on copy >> "{ulog}"
+) else (
+  echo [%date% %time%] copy ok >> "{ulog}"
+  del "{new_exe}" >nul 2>&1
+)
+"{sys32}\\schtasks.exe" /run /tn "{TASK_NAME}" >>"{ulog}" 2>&1
+if errorlevel 1 (
+  echo [%date% %time%] schtasks run failed, direct start >> "{ulog}"
+  start "" "{target}" --background
+)
+echo [%date% %time%] update bat done >> "{ulog}"
 (goto) 2>nul & del "%~f0"
 """, encoding="ascii")
 
@@ -80,4 +102,5 @@ del "{new_exe}" >nul 2>&1
     cloud.set_status("offline")
     subprocess.Popen(["cmd", "/c", str(bat)], creationflags=(
         subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP))
+    cfgmod.PID_FILE.unlink(missing_ok=True)  # os._exit skips atexit cleanup
     os._exit(0)

@@ -117,6 +117,8 @@ class CommandHandler:
                 self.cloud.set_status("offline")
                 log.info("Shutdown requested by dashboard — exiting")
                 self.shutdown.set()
+                from .config import PID_FILE
+                PID_FILE.unlink(missing_ok=True)  # os._exit skips atexit
                 os._exit(0)
 
             elif ctype == "restart":
@@ -129,6 +131,8 @@ class CommandHandler:
                 # the child silently fails to run.
                 subprocess.Popen(args + ["--background"], creationflags=(
                     subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP))
+                from .config import PID_FILE
+                PID_FILE.unlink(missing_ok=True)  # os._exit skips atexit
                 os._exit(0)
 
             elif ctype == "update":

@@ -197,10 +197,15 @@ def relaunch_background():
 
 # ── single-instance guard ────────────────────────────────────
 def _pid_alive(pid: int) -> bool:
+    """Alive AND actually one of ours — Windows reuses PIDs, and a stale PID
+    file matching some unrelated process caused false 'already running'."""
     try:
         out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
                              capture_output=True, text=True, timeout=5).stdout
-        return str(pid) in out
+        if str(pid) not in out:
+            return False
+        image = out.strip().split()[0].lower() if out.strip() else ""
+        return "rpa-bot" in image or "python" in image
     except Exception:
         return False
 
