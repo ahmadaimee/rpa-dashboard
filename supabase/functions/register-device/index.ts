@@ -69,6 +69,7 @@ Deno.serve(async (req) => {
       display_name: body.display_name || username,
       hostname: body.hostname || null,
       app_version: body.app_version || null,
+      company: pc.company || null,   // worker inherits the pairing code's company
       last_seen: new Date().toISOString(),
     })
     .select("id")
