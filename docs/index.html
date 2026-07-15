@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RPA-Bot — Control Room</title>
+<title>RPA Orchestrator</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="config.js"></script>
@@ -18,9 +18,18 @@
 .bar-run   { animation:bar-run 1.8s ease-in-out infinite; }
 .fade-in   { animation:fade-in .2s ease-out both; }
 
-body { font-family:'Segoe UI',system-ui,sans-serif; background:#f3f3f3; color:#1a1a1a; }
-.tab-active { border-bottom:2px solid #0078d4; color:#0078d4; font-weight:600; }
-.card { background:#fff; border:1px solid #e5e7eb; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+body { font-family:'Segoe UI',system-ui,sans-serif; background:#f6f7f9; color:#1a1a1a; }
+.card { background:#fff; border:1px solid #e8eaee; border-radius:10px; box-shadow:0 1px 2px rgba(16,24,40,.05); }
+
+/* Sidebar */
+.nav-item {
+  display:flex; align-items:center; gap:.7rem; width:100%;
+  padding:.55rem .85rem; border-radius:8px; font-size:.875rem;
+  color:#9ca3af; cursor:pointer; border:none; background:transparent;
+  transition:all .15s; text-align:left;
+}
+.nav-item:hover { background:rgba(255,255,255,.07); color:#e5e7eb; }
+.nav-item.nav-active { background:#0078d4; color:#fff; font-weight:600; }
 
 input[type=text], input[type=email], input[type=password], input[type=time], input[type=number], select, textarea {
   background:#fff; border:1px solid #d1d5db; border-radius:4px; color:#111827; font-family:inherit;
@@ -50,9 +59,9 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
 <body>
 
 <!-- ═══ LOGIN ═══ -->
-<div id="login-view" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-[#f3f3f3]">
+<div id="login-view" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-[#f6f7f9]">
   <div class="card p-8 w-full max-w-sm">
-    <h1 class="text-xl font-semibold text-gray-900 mb-1">⚙️ RPA-Bot</h1>
+    <h1 class="text-xl font-semibold text-gray-900 mb-1">🤖 RPA Orchestrator</h1>
     <p class="text-gray-500 text-sm mb-6">Sign in to the control room</p>
     <form onsubmit="doLogin(event)">
       <label class="block text-xs text-gray-500 mb-1">Email</label>
@@ -66,32 +75,37 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
 </div>
 
 <!-- ═══ APP ═══ -->
-<div id="app" class="hidden max-w-7xl mx-auto px-4 py-6">
+<div id="app" class="hidden">
 
-  <!-- Header -->
-  <div class="flex items-center justify-between mb-6">
-    <div>
-      <h1 class="text-2xl font-semibold tracking-tight text-gray-900">⚙️ RPA-Bot</h1>
-      <p class="text-gray-500 text-sm mt-0.5">RK-Keyence Automation Control Room — Cloud</p>
+  <!-- Sidebar -->
+  <aside class="fixed inset-y-0 left-0 w-60 bg-gray-900 flex flex-col z-40">
+    <div class="flex items-center gap-3 px-5 py-5 border-b border-gray-800">
+      <span class="w-9 h-9 rounded-lg flex items-center justify-center text-lg" style="background:linear-gradient(135deg,#0d8ee9,#005a9e)">🤖</span>
+      <div>
+        <p class="text-white font-semibold text-sm leading-tight">RPA Orchestrator</p>
+        <p class="text-gray-500 text-xs">RK-Keyence · Cloud</p>
+      </div>
     </div>
-    <div class="flex items-center gap-4">
-      <span id="conn-status" class="flex items-center gap-1.5 text-xs text-gray-400">
-        <span id="conn-dot" class="w-2 h-2 rounded-full bg-gray-300 inline-block"></span>
-        <span id="conn-label">Connecting…</span>
-      </span>
-      <span id="last-sync" class="text-xs text-gray-400"></span>
-      <button onclick="doLogout()" class="text-xs text-gray-400 hover:text-red-500 cursor-pointer">Sign out</button>
+    <nav class="flex-1 px-3 py-4 space-y-1 select-none">
+      <button onclick="tab('dashboard')" id="tab-dashboard" class="nav-item nav-active"><span>🏠</span> Dashboard</button>
+      <button onclick="tab('scenarios')" id="tab-scenarios" class="nav-item"><span>📄</span> Scenarios</button>
+      <button onclick="tab('schedules')" id="tab-schedules" class="nav-item"><span>⏰</span> Schedules</button>
+      <button onclick="tab('logs')"      id="tab-logs"      class="nav-item"><span>📋</span> Logs</button>
+      <button onclick="tab('settings')"  id="tab-settings"  class="nav-item"><span>⚙️</span> Settings</button>
+    </nav>
+    <div class="px-5 py-4 border-t border-gray-800 space-y-2">
+      <div class="flex items-center gap-2">
+        <span id="conn-dot" class="w-2 h-2 rounded-full bg-gray-500 inline-block"></span>
+        <span id="conn-label" class="text-xs text-gray-400">Connecting…</span>
+        <span id="last-sync" class="text-xs text-gray-600 ml-auto"></span>
+      </div>
+      <button onclick="doLogout()" class="text-xs text-gray-500 hover:text-red-400 cursor-pointer">Sign out</button>
     </div>
-  </div>
+  </aside>
 
-  <!-- Tabs -->
-  <div class="flex gap-1 border-b border-gray-200 mb-5 select-none">
-    <button onclick="tab('dashboard')" id="tab-dashboard" class="pb-2 px-3 text-sm tab-active cursor-pointer">Dashboard</button>
-    <button onclick="tab('scenarios')"  id="tab-scenarios"  class="pb-2 px-3 text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Scenarios</button>
-    <button onclick="tab('schedules')"  id="tab-schedules"  class="pb-2 px-3 text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Schedules</button>
-    <button onclick="tab('settings')"   id="tab-settings"   class="pb-2 px-3 text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Settings</button>
-    <button onclick="tab('logs')"       id="tab-logs"       class="pb-2 px-3 text-sm text-gray-500 hover:text-gray-900 cursor-pointer">Logs</button>
-  </div>
+  <!-- Main -->
+  <div class="ml-60 px-8 py-7 max-w-6xl">
+  <h1 id="page-title" class="text-xl font-semibold tracking-tight text-gray-900 mb-5">Dashboard</h1>
 
   <!-- ═══ DASHBOARD ═══ -->
   <div id="view-dashboard">
@@ -404,6 +418,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
     </div>
   </div>
 
+  </div><!-- /main -->
 </div><!-- /app -->
 
 <script>
@@ -584,8 +599,9 @@ function diffPCCards() {
     const borderC = isRunning ? '#0078d4' : online ? '#d1d5db' : '#e5e7eb';
     const dot = isRunning ? 'bg-blue-500 spin' : online ? 'bg-green-500 pulse-dot' : 'bg-gray-300';
     const label = runningTask ? runningTask.scenario_name
-                : (online && w.rk_running) ? 'Running Outside App'
-                : online ? (w.enabled ? 'Idle' : 'Disabled') : 'Offline';
+                : (online && w.rk_running) ? `▶ ${w.rk_scenario || 'Scenario'} (started on PC)`
+                : online ? (w.enabled ? (w.rk_open ? 'Idle — Keyence open' : 'Idle') : 'Disabled')
+                : 'Offline';
     const seen = w.last_seen ? new Date(w.last_seen).toLocaleTimeString() : 'never';
     const textCls = isRunning ? 'text-blue-700' : online ? 'text-gray-700' : 'text-gray-400';
     return { key: w.id, html: `
@@ -596,7 +612,7 @@ function diffPCCards() {
           <span class="w-2.5 h-2.5 rounded-full ${dot} flex-shrink-0"></span>
         </div>
         <p class="text-xs truncate ${textCls} mb-1.5">${esc(label)}</p>
-        ${runningTask ? `<div class="h-1 rounded-full bg-gray-200 overflow-hidden">
+        ${isRunning ? `<div class="h-1 rounded-full bg-gray-200 overflow-hidden">
           <div class="h-full w-1/3 rounded-full bar-run" style="background:#0078d4"></div></div>` : ''}
         <p class="text-xs text-gray-300 mt-1.5">Last seen ${seen}${w.app_version ? ' · v' + esc(w.app_version) : ''}</p>
       </div>` };
@@ -1395,13 +1411,15 @@ async function deleteSched(id) {
 // ═══════════════════════════════════════════════════════════
 //  Tabs
 // ═══════════════════════════════════════════════════════════
+const PAGE_TITLES = { dashboard:'Dashboard', scenarios:'Scenario Library',
+                      schedules:'Schedules', settings:'Settings', logs:'Task Logs' };
 function tab(name) {
   activeTab = name;
   ['dashboard','scenarios','schedules','settings','logs'].forEach(t => {
     document.getElementById('view-' + t).classList.toggle('hidden', t !== name);
-    const btn = document.getElementById('tab-' + t);
-    btn.classList.toggle('tab-active', t === name);
+    document.getElementById('tab-' + t).classList.toggle('nav-active', t === name);
   });
+  document.getElementById('page-title').textContent = PAGE_TITLES[name] || name;
   if (name === 'logs') { refreshLogSelect(); renderLogView(); }
 }
 

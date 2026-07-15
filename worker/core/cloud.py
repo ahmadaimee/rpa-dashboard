@@ -47,12 +47,14 @@ class Cloud:
         return default
 
     # ── workers ─────────────────────────────────────────────
-    def heartbeat(self, status: str, rk_running: bool, app_version: str):
+    def heartbeat(self, status: str, rk: dict, app_version: str):
         self._safe(
             lambda: self.client.table("workers").update({
                 "last_seen": utcnow(),
                 "status": status,
-                "rk_running": rk_running,
+                "rk_open": rk.get("open", False),
+                "rk_running": rk.get("running", False),
+                "rk_scenario": rk.get("scenario"),
                 "app_version": app_version,
             }).eq("id", self.cfg.worker_id).execute(),
             "heartbeat",

@@ -37,8 +37,17 @@ def _fail(op: str, r: subprocess.CompletedProcess):
     raise RuntimeError(f"schtasks {op} failed: {err}")
 
 
+def _is_keyence_task(name: str, task_to_run: str) -> bool:
+    """Only Keyence/RPA-related tasks are reported to the dashboard."""
+    if name.lstrip("\\").startswith(OURS_PREFIX):
+        return True
+    t = (task_to_run or "").lower()
+    return ("rkscenariomanager" in t or ".rks" in t
+            or "rpa-bot" in t or "keyence" in t)
+
+
 def list_tasks() -> list[dict]:
-    """All scheduled tasks except the \\Microsoft\\ tree."""
+    """Keyence-related scheduled tasks only (ours + anything launching RK)."""
     r = _schtasks(["/query", "/fo", "csv", "/v"])
     if r.returncode != 0:
         _fail("/query", r)
@@ -50,6 +59,8 @@ def list_tasks() -> list[dict]:
         if not name or name == "TaskName":          # repeated header lines
             continue
         if name.startswith("\\Microsoft\\") or name in seen:
+            continue
+        if not _is_keyence_task(name, row.get("Task To Run") or ""):
             continue
         seen.add(name)
         sched_parts = [row.get("Schedule Type"), row.get("Days"),
