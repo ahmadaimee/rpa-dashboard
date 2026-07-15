@@ -34,6 +34,8 @@ class Cloud:
         self._signin_at = 0.0        # monotonic time of last sign-in attempt
         self._signin_backoff = 0.0   # grows on failures/429s
         self._consec_failures = 0    # self-heal restart when the client is wedged
+        self._company = None         # this worker's company slug (lazy)
+        self._company_loaded = False
 
     # ── auth ────────────────────────────────────────────────
     def sign_in(self):
@@ -264,19 +266,34 @@ class Cloud:
         return bool(res and res.data)
 
     # ── scenarios ───────────────────────────────────────────
+    def my_company(self) -> str | None:
+        """This worker's company slug (scenarios are unique per company)."""
+        if not self._company_loaded:
+            res = self._safe(
+                lambda: self.client.table("workers").select("company")
+                    .eq("id", self.cfg.worker_id).single().execute(),
+                "my_company",
+            )
+            if res is not None:
+                self._company = (res.data or {}).get("company")
+                self._company_loaded = True
+        return self._company
+
     def upsert_scenarios(self, entries: list[dict]):
         """entries: [{name, path?}] — rows without 'path' leave any existing
         custom path untouched (PostgREST only updates supplied columns)."""
         now = utcnow()
+        company = self.my_company()
         plain  = [e for e in entries if "path" not in e]
         pathed = [e for e in entries if "path" in e]
         for batch in (plain, pathed):
             if not batch:
                 continue
-            rows = [{**e, "reported_by": self.cfg.worker_id, "last_seen_at": now}
+            rows = [{**e, "reported_by": self.cfg.worker_id,
+                     "last_seen_at": now, "company": company}
                     for e in batch]
             self._safe(
                 lambda rows=rows: self.client.table("scenarios")
-                    .upsert(rows, on_conflict="name").execute(),
+                    .upsert(rows, on_conflict="company,name").execute(),
                 "upsert_scenarios",
             )
