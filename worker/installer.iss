@@ -33,7 +33,7 @@ Name: "{userprograms}\RPA-Bot"; Filename: "{app}\RPA-Bot.exe"; IconFilename: "{a
 
 [Run]
 ; Launch after install — shows the pairing / start menu in a console window
-Filename: "{app}\RPA-Bot.exe"; Description: "Start RPA-Bot now (pairing on first run)"; Flags: postinstall nowait
+Filename: "{app}\RPA-Bot.exe"; Description: "Start RPA-Bot now (pairing on first run)"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 ; Stop the worker, remove the scheduled task, clear registration — silently
