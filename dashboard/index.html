@@ -684,7 +684,10 @@ function diffTasks() {
         <div class="flex items-center gap-4 px-5 py-2.5 hover:bg-gray-50 transition-colors">
           <div class="w-5 flex-shrink-0 text-center text-sm">${ico}</div>
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium truncate text-gray-900">${esc(t.scenario_name)}</p>
+            <p class="text-sm font-medium truncate text-gray-900">${esc(t.scenario_name)}
+              ${t.source === 'external' ? '<span class="ml-1 text-xs font-normal text-purple-600 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5">on-PC</span>' : ''}
+              ${t.source === 'win_schedule' ? '<span class="ml-1 text-xs font-normal text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">win-sched</span>' : ''}
+              ${t.source === 'schedule' ? '<span class="ml-1 text-xs font-normal text-blue-600 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">schedule</span>' : ''}</p>
             <p class="text-xs text-gray-400">${esc(workerName(t.worker_id))} · ${dt}${dur ? ' · ' + dur : ''}</p>
             ${t.error ? `<p class="text-xs text-red-500 mt-0.5 truncate">${esc(t.error)}</p>` : ''}
           </div>

@@ -109,6 +109,27 @@ class Cloud:
             "update_task",
         )
 
+    def insert_external_task(self, scenario_name: str) -> str | None:
+        res = self._safe(
+            lambda: self.client.table("tasks").insert({
+                "scenario_name": scenario_name,
+                "worker_id": self.cfg.worker_id,
+                "status": "running",
+                "source": "external",
+                "started_at": utcnow(),
+            }).execute(),
+            "insert_external_task",
+        )
+        return res.data[0]["id"] if res and res.data else None
+
+    def get_task(self, task_id: str) -> dict | None:
+        res = self._safe(
+            lambda: self.client.table("tasks").select("*")
+                .eq("id", task_id).single().execute(),
+            "get_task",
+        )
+        return res.data if res and res.data else None
+
     def task_status(self, task_id: str) -> str | None:
         res = self._safe(
             lambda: self.client.table("tasks").select("status")

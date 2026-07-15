@@ -10,9 +10,9 @@ import sys
 import threading
 import time
 
-from .cloud import Cloud
-from .runner import Runner
-from . import scanner, winsched
+from .cloud import Cloud, utcnow
+from .runner import Runner, send_ctrl_alt_p
+from . import heartbeat, rkdetect, scanner, winsched
 
 log = logging.getLogger("worker")
 
@@ -41,6 +41,23 @@ class CommandHandler:
                 log.debug("Command loop error: %s", e)
             time.sleep(POLL_SECS)
 
+    def _stop_external(self, task_id: str) -> bool:
+        """Stop a scenario the user started directly on this PC."""
+        task = self.cloud.get_task(task_id)
+        if not task or task.get("source") != "external" or task.get("status") != "running":
+            return False
+        log.info("Stopping external Keyence run (task %s)", task_id)
+        send_ctrl_alt_p()               # Keyence's graceful stop hotkey
+        time.sleep(2)
+        rkdetect.kill_keyence_dotnets(heartbeat.monitor._active_pids or None)
+        self.cloud.update_task(task_id, {
+            "status": "stopped",
+            "error": "Stopped from dashboard",
+            "finished_at": utcnow(),
+        })
+        heartbeat.set_external_stopped()
+        return True
+
     def _handle(self, cmd: dict):
         ctype = cmd.get("type")
         payload = cmd.get("payload") or {}
@@ -52,6 +69,8 @@ class CommandHandler:
                 task_id = payload.get("task_id")
                 if task_id and self.runner.request_stop(task_id):
                     self.cloud.finish_command(cmd["id"], True, {"note": "stop signalled"})
+                elif task_id and self._stop_external(task_id):
+                    self.cloud.finish_command(cmd["id"], True, {"note": "external run stopped"})
                 else:
                     # Not running here (already finished, or still pending —
                     # pending tasks are stopped directly by the dashboard).
