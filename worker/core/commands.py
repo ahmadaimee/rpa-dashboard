@@ -106,9 +106,10 @@ class CommandHandler:
                 log.info("Restart requested by dashboard — relaunching")
                 exe = sys.executable
                 args = [exe] if getattr(sys, "frozen", False) else [exe, sys.argv[0]]
+                # NOTE: never combine DETACHED_PROCESS with CREATE_NO_WINDOW —
+                # the child silently fails to run.
                 subprocess.Popen(args + ["--background"], creationflags=(
-                    subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                    | subprocess.CREATE_NO_WINDOW))
+                    subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP))
                 os._exit(0)
 
             elif ctype == "update":

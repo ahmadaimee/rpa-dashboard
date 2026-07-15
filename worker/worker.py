@@ -79,6 +79,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="RPA-Bot Worker (cloud)")
     p.add_argument("--background", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--uninstall", action="store_true", help="Remove autostart and stop the worker")
+    p.add_argument("--quiet", action="store_true", help="No prompts (used by the setup uninstaller)")
     p.add_argument("--enqueue", metavar="SCENARIO",
                    help="Insert a cloud task for this PC and exit "
                         "(used by dashboard-created Windows scheduled tasks)")
@@ -147,7 +148,8 @@ def main():
             except Exception:
                 cloud = None
         installer.uninstall(cloud)
-        input("  Press Enter to close...")
+        if not args.quiet:
+            input("  Press Enter to close...")
         return
 
     cfg = cfgmod.load()
@@ -188,9 +190,19 @@ def main():
     _setup_logging(to_file=False)
     if cfg and installer.is_already_running():
         print()
-        print("  ✅ Orchard RPA Worker is already running in the background.")
+        print("  ✅ RPA-Bot Worker is already running in the background.")
+        print(f"  This exe: v{__version__}")
         print()
-        input("  Press Enter to close this window...")
+        print("  [Enter] Close   [R] Upgrade — restart the worker using THIS exe")
+        if input("  Choice: ").strip().lower() == "r":
+            print("  Stopping old worker...")
+            installer.kill_running_worker()
+            print("  Updating startup task to this exe and restarting...")
+            installer.install_startup_task()
+            installer.relaunch_background()
+            time.sleep(3)
+            print(f"  ✅ Worker restarted on v{__version__}.")
+            time.sleep(2)
         return
 
     if cfg:

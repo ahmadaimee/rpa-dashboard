@@ -189,8 +189,9 @@ def relaunch_background():
         cmd = [py, cfgmod.exe_path(), "--background"]
     flags = 0
     if platform.system() == "Windows":
-        flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                 | subprocess.CREATE_NO_WINDOW)
+        # DETACHED_PROCESS + CREATE_NO_WINDOW are mutually exclusive — combo
+        # silently breaks the child. Use NO_WINDOW only.
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(cmd, creationflags=flags)
 
 
@@ -211,6 +212,22 @@ def is_already_running() -> bool:
         except Exception:
             pass
     return False
+
+
+def kill_running_worker() -> bool:
+    """Kill the background worker recorded in the PID file (upgrade path)."""
+    killed = False
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text().strip())
+            if pid != os.getpid() and _pid_alive(pid):
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                               capture_output=True)
+                killed = True
+        except Exception:
+            pass
+        PID_FILE.unlink(missing_ok=True)
+    return killed
 
 
 def acquire_instance_lock():

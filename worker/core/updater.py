@@ -57,22 +57,27 @@ def check_and_apply(cloud: Cloud, current_version: str) -> bool:
     new_exe = update_dir / "OrchardRPAWorker.new.exe"
     new_exe.write_bytes(data)
 
+    # Full System32 paths: immune to PATH oddities; ping as sleep (timeout.exe
+    # fails without a console). NOTE: DETACHED_PROCESS must NOT be combined
+    # with CREATE_NO_WINDOW — that combo silently prevents cmd from running
+    # the batch at all (caused the v1.2.0 update hang).
+    sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
     bat = update_dir / "apply_update.bat"
     bat.write_text(f"""@echo off
 :waitloop
-tasklist /FI "PID eq {os.getpid()}" /NH | find "{os.getpid()}" >nul && (
-  timeout /t 1 /nobreak >nul
+"{sys32}\\tasklist.exe" /FI "PID eq {os.getpid()}" /NH | "{sys32}\\findstr.exe" /C:"{os.getpid()}" >nul
+if not errorlevel 1 (
+  "{sys32}\\ping.exe" -n 2 127.0.0.1 >nul
   goto waitloop
 )
 copy /y "{new_exe}" "{target}" >nul
 del "{new_exe}" >nul 2>&1
-schtasks /run /tn "{TASK_NAME}" >nul 2>&1 || start "" "{target}" --background
+"{sys32}\\schtasks.exe" /run /tn "{TASK_NAME}" >nul 2>&1 || start "" "{target}" --background
 (goto) 2>nul & del "%~f0"
 """, encoding="ascii")
 
     log.info("Applying update %s — restarting", latest)
     cloud.set_status("offline")
     subprocess.Popen(["cmd", "/c", str(bat)], creationflags=(
-        subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        | subprocess.CREATE_NO_WINDOW))
+        subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP))
     os._exit(0)
