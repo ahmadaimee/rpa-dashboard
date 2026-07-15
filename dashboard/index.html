@@ -1314,7 +1314,7 @@ async function inviteStaff() {
   if (!email) return alert('Enter an email.');
   if (!company) return alert('Select a company (or Super Admin).');
   const isSuper = company === '__super__';
-  if (isSuper && !confirm('Super Admin ko SAB companies ka mukammal access hoga\n(companies/staff/releases samet). Continue?')) return;
+  if (isSuper && !confirm('A Super Admin gets full access to ALL companies\n(including companies, staff and releases). Continue?')) return;
   btn.disabled = true;
   const body = isSuper ? { email, super: true } : { email, company };
   const { data, error } = await sb.functions.invoke('invite-admin', { body });
