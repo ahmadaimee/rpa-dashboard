@@ -12,7 +12,7 @@ import time
 
 from .cloud import Cloud
 from .runner import Runner
-from . import scanner
+from . import scanner, winsched
 
 log = logging.getLogger("worker")
 
@@ -57,6 +57,23 @@ class CommandHandler:
                     # pending tasks are stopped directly by the dashboard).
                     self.cloud.finish_command(cmd["id"], True,
                                               {"note": "task not running on this worker"})
+
+            elif ctype == "win_sched_list":
+                result = winsched.sync(self.cloud)
+                self.cloud.finish_command(cmd["id"], True, result)
+
+            elif ctype == "win_sched_create":
+                task_name = winsched.create_task(
+                    payload["name"], payload["scenario"],
+                    payload.get("days") or [], payload.get("time") or "00:00",
+                )
+                winsched.sync(self.cloud)
+                self.cloud.finish_command(cmd["id"], True, {"task_name": task_name})
+
+            elif ctype == "win_sched_delete":
+                winsched.delete_task(payload["task_name"])
+                winsched.sync(self.cloud)
+                self.cloud.finish_command(cmd["id"], True)
 
             elif ctype == "scan":
                 result = scanner.scan(self.cloud, self.cfg)

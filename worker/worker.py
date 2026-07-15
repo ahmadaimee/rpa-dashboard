@@ -78,6 +78,9 @@ def parse_args():
     p = argparse.ArgumentParser(description="Orchard RPA Worker (cloud)")
     p.add_argument("--background", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--uninstall", action="store_true", help="Remove autostart and stop the worker")
+    p.add_argument("--enqueue", metavar="SCENARIO",
+                   help="Insert a cloud task for this PC and exit "
+                        "(used by dashboard-created Windows scheduled tasks)")
     return p.parse_args()
 
 
@@ -89,6 +92,11 @@ def worker_loop(cfg: cfgmod.Config):
 
     cloud.set_status("idle")
     scanner.scan(cloud, cfg)  # auto-scan on startup
+    try:
+        from core import winsched
+        winsched.sync(cloud)  # report Windows scheduled tasks on startup
+    except Exception as e:
+        log.debug("Initial winsched sync failed: %s", e)
     heartbeat.start(cloud, runner, __version__)
     cmds.start()
 
@@ -136,6 +144,23 @@ def main():
         return
 
     cfg = cfgmod.load()
+
+    # ── Enqueue mode (fired by a Windows scheduled task) ────
+    if args.enqueue:
+        _hide_console()
+        _setup_logging(to_file=True)
+        if not cfg:
+            log.error("--enqueue: no config — run the installer first")
+            return
+        cloud = Cloud(cfg)
+        try:
+            cloud.sign_in()
+        except Exception as e:
+            log.error("--enqueue: sign-in failed: %s", e)
+            return
+        ok = cloud.enqueue_task(args.enqueue)
+        log.info("--enqueue '%s' → %s", args.enqueue, "queued" if ok else "FAILED")
+        return
 
     # ── Background mode (Task Scheduler / relaunch) ─────────
     if args.background:

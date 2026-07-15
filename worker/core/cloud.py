@@ -153,6 +153,32 @@ class Cloud:
             "finish_command",
         )
 
+    # ── windows scheduler snapshot ──────────────────────────
+    def replace_win_tasks(self, rows: list[dict]):
+        self._safe(
+            lambda: self.client.table("win_tasks").delete()
+                .eq("worker_id", self.cfg.worker_id).execute(),
+            "clear_win_tasks",
+        )
+        if rows:
+            self._safe(
+                lambda: self.client.table("win_tasks").insert(rows).execute(),
+                "insert_win_tasks",
+            )
+
+    def enqueue_task(self, scenario_name: str) -> bool:
+        """Insert a cloud task for THIS worker (used by --enqueue from a
+        Windows scheduled task). Returns True on success."""
+        res = self._safe(
+            lambda: self.client.table("tasks").insert({
+                "scenario_name": scenario_name,
+                "worker_id": self.cfg.worker_id,
+                "source": "win_schedule",
+            }).execute(),
+            "enqueue_task",
+        )
+        return bool(res and res.data)
+
     # ── scenarios ───────────────────────────────────────────
     def upsert_scenarios(self, names: list[str]):
         now = utcnow()

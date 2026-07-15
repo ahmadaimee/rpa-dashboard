@@ -240,10 +240,66 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
       </div>
       <button onclick="addSchedule()" class="btn-primary mt-4">Add Schedule</button>
     </div>
-    <div class="card overflow-hidden">
+    <div class="card overflow-hidden mb-4">
       <h2 class="text-sm font-semibold text-gray-700 px-5 py-3 border-b border-gray-200 bg-gray-50">Active Schedules</h2>
       <div id="schedule-list" class="divide-y divide-gray-100"></div>
       <div id="schedule-empty" class="py-10 text-center text-gray-400 text-sm hidden">No schedules configured</div>
+    </div>
+
+    <!-- Windows Task Scheduler -->
+    <div class="card p-5 mb-4" style="border-left:3px solid #16a34a;">
+      <div class="flex items-center justify-between flex-wrap gap-3 mb-1">
+        <h2 class="text-base font-semibold text-gray-900">🪟 Windows Task Scheduler</h2>
+        <div class="flex items-center gap-2">
+          <select id="win-sel-pc" onchange="renderWinTasks()" class="px-3 py-1.5 text-sm"></select>
+          <button id="win-refresh-btn" onclick="winSchedRefresh()" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded cursor-pointer">↻ Refresh from PC</button>
+        </div>
+      </div>
+      <p class="text-xs text-gray-500 mb-4">
+        Creates a <strong class="text-gray-700">real Windows scheduled task</strong> on the selected PC. At the set time, Windows runs
+        <code class="text-gray-700">OrchardRPAWorker.exe --enqueue</code>, which drops the scenario into this PC's normal queue —
+        so status and live logs still show up here. Below you also see the PC's other (non-Microsoft) scheduled tasks, read-only.
+      </p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Task Name</label>
+          <input id="win-name" type="text" placeholder="e.g. Nightly-Claims" class="w-full px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Scenario</label>
+          <select id="win-scenario" class="w-full px-3 py-2 text-sm"></select>
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-xs text-gray-500 mb-2">Days of Week</label>
+          <div class="flex flex-wrap gap-2">
+            <label class="sched-day-lbl"><input type="checkbox" value="0" class="win-day sr-only"><span>Sun</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="1" class="win-day sr-only"><span>Mon</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="2" class="win-day sr-only"><span>Tue</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="3" class="win-day sr-only"><span>Wed</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="4" class="win-day sr-only"><span>Thu</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="5" class="win-day sr-only"><span>Fri</span></label>
+            <label class="sched-day-lbl"><input type="checkbox" value="6" class="win-day sr-only"><span>Sat</span></label>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Time (24-hour, PC local time)</label>
+          <input id="win-time" type="time" value="00:00" class="w-full px-3 py-2 text-sm">
+        </div>
+      </div>
+      <button onclick="winSchedCreate()" class="btn-primary">Create Windows Task</button>
+      <span id="win-sched-status" class="ml-3 text-xs text-gray-500"></span>
+    </div>
+
+    <div class="card overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50">
+        <h2 class="text-sm font-semibold text-gray-700">Scheduled Tasks on <span id="win-pc-label">PC</span></h2>
+        <span id="win-task-count" class="text-xs text-gray-400"></span>
+      </div>
+      <div id="win-task-list" class="divide-y divide-gray-100"></div>
+      <div id="win-task-empty" class="py-10 text-center text-gray-400 text-sm hidden">
+        No data yet — select a PC and press <strong>Refresh from PC</strong>.
+      </div>
     </div>
   </div>
 
@@ -302,7 +358,7 @@ const ONLINE_MS = 30_000;
 const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-let G = { workers:[], scenarios:[], tasks:[], schedules:[], codes:[], scanCmd:null };
+let G = { workers:[], scenarios:[], tasks:[], schedules:[], codes:[], winTasks:[], scanCmd:null, winCmd:null };
 let activeTab = 'dashboard';
 let logTaskId = null, logLines = [];
 
@@ -348,18 +404,20 @@ function setConn(up, label) {
 }
 
 async function fetchAll() {
-  const [w, s, t, sc, pc] = await Promise.all([
+  const [w, s, t, sc, pc, wt] = await Promise.all([
     sb.from('workers').select('*').order('username'),
     sb.from('scenarios').select('*').order('name'),
     sb.from('tasks').select('*').order('created_at', { ascending:false }).limit(300),
     sb.from('schedules').select('*').order('created_at'),
     sb.from('pairing_codes').select('*').is('used_at', null).gt('expires_at', new Date().toISOString()),
+    sb.from('win_tasks').select('*').order('task_name'),
   ]);
   if (w.data)  G.workers   = w.data;
   if (s.data)  G.scenarios = s.data;
   if (t.data)  G.tasks     = t.data;
   if (sc.data) G.schedules = sc.data;
   if (pc.data) G.codes     = pc.data;
+  if (wt.data) G.winTasks  = wt.data;
   document.getElementById('last-sync').textContent = new Date().toLocaleTimeString();
 }
 
@@ -375,6 +433,7 @@ function subscribeRealtime() {
     .on('postgres_changes', { event:'*', schema:'public', table:'tasks'     }, scheduleRefetch)
     .on('postgres_changes', { event:'*', schema:'public', table:'scenarios' }, scheduleRefetch)
     .on('postgres_changes', { event:'*', schema:'public', table:'schedules' }, scheduleRefetch)
+    .on('postgres_changes', { event:'*', schema:'public', table:'win_tasks' }, scheduleRefetch)
     .on('postgres_changes', { event:'*', schema:'public', table:'commands'  }, onCommandChange)
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'task_logs' }, onLogInsert)
     .subscribe((status) => setConn(status === 'SUBSCRIBED'));
@@ -383,6 +442,7 @@ function subscribeRealtime() {
 function onCommandChange(payload) {
   const row = payload.new;
   if (G.scanCmd && row && row.id === G.scanCmd.id) { G.scanCmd = row; renderScan(); }
+  if (G.winCmd && row && row.id === G.winCmd.id) { G.winCmd = row; renderWinStatus(); }
 }
 
 function onLogInsert(payload) {
@@ -651,6 +711,94 @@ function refreshSelects() {
   if (selPc._last !== pcOpts) { const v = selPc.value; selPc.innerHTML = pcOpts; selPc._last = pcOpts; if (v) selPc.value = v; }
   const selScen = document.getElementById('sel-scenario');
   if (selScen._last !== scenOpts) { const v = selScen.value; selScen.innerHTML = scenOpts; selScen._last = scenOpts; if (v) selScen.value = v; }
+  const winPc = document.getElementById('win-sel-pc');
+  if (winPc._last !== pcOpts) { const v = winPc.value; winPc.innerHTML = pcOpts; winPc._last = pcOpts; if (v) winPc.value = v; }
+  const winScen = document.getElementById('win-scenario');
+  if (winScen._last !== scenOpts) { const v = winScen.value; winScen.innerHTML = scenOpts; winScen._last = scenOpts; if (v) winScen.value = v; }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Windows Task Scheduler
+// ═══════════════════════════════════════════════════════════
+function selectedWinWorker() {
+  const id = document.getElementById('win-sel-pc').value;
+  return workerById(id) || null;
+}
+
+function renderWinTasks() {
+  const w = selectedWinWorker();
+  document.getElementById('win-pc-label').textContent = w ? (w.display_name || w.username) : 'PC';
+  const list = document.getElementById('win-task-list');
+  const empty = document.getElementById('win-task-empty');
+  const rows = w ? G.winTasks.filter(t => t.worker_id === w.id) : [];
+  document.getElementById('win-task-count').textContent =
+    rows.length ? `${rows.length} task(s) · last synced ${new Date(Math.max(...rows.map(r => new Date(r.updated_at)))).toLocaleString()}` : '';
+  if (!rows.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+
+  const sorted = [...rows].sort((a, b) => (b.is_ours - a.is_ours) || a.task_name.localeCompare(b.task_name));
+  diffList(list, sorted.map(t => ({ key: t.id, html: `
+    <div class="flex items-center gap-4 px-5 py-2.5 hover:bg-gray-50 transition-colors">
+      <div class="w-5 flex-shrink-0 text-center text-sm">${t.is_ours ? '🤖' : '🪟'}</div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium truncate text-gray-900">${esc(t.task_name)}</p>
+        <p class="text-xs text-gray-400 truncate">${esc(t.schedule || '')}${t.task_to_run ? ' · ' + esc(t.task_to_run) : ''}</p>
+        <p class="text-xs text-gray-400 mt-0.5">Next: ${esc(t.next_run || '—')} · Last: ${esc(t.last_run || 'never')}${t.last_result ? ' (result ' + esc(t.last_result) + ')' : ''}</p>
+      </div>
+      <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded border ${t.status === 'Running' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-500 border-gray-200'}">${esc(t.status || '?')}</span>
+      ${t.is_ours ? `<button onclick="winSchedDelete('${esc(t.task_name)}')" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0 cursor-pointer">Delete</button>`
+                  : '<span class="text-xs text-gray-300 flex-shrink-0">read-only</span>'}
+    </div>` })));
+}
+
+function renderWinStatus() {
+  const el = document.getElementById('win-sched-status');
+  const btn = document.getElementById('win-refresh-btn');
+  const cmd = G.winCmd;
+  if (!cmd) { el.textContent = ''; btn.disabled = false; return; }
+  if (['pending','acked'].includes(cmd.status)) {
+    el.textContent = '⏳ Waiting for the worker…'; el.className = 'ml-3 text-xs text-yellow-600';
+    btn.disabled = true;
+  } else if (cmd.status === 'done') {
+    el.textContent = '✅ Done'; el.className = 'ml-3 text-xs text-green-600';
+    btn.disabled = false; setTimeout(() => { if (G.winCmd === cmd) { G.winCmd = null; renderWinStatus(); } }, 4000);
+  } else {
+    el.textContent = '❌ ' + (cmd.result?.error || 'Failed'); el.className = 'ml-3 text-xs text-red-600';
+    btn.disabled = false;
+  }
+}
+
+async function _winCommand(type, payload) {
+  const w = selectedWinWorker();
+  if (!w) return alert('Select a PC first.');
+  if (!isOnline(w) && !confirm(`"${w.display_name || w.username}" is offline.\nThe command will run when it comes back online. Continue?`)) return;
+  const { data, error } = await sb.from('commands')
+    .insert({ worker_id: w.id, type, payload }).select().single();
+  if (error) return alert('Error: ' + error.message);
+  G.winCmd = data;
+  renderWinStatus();
+}
+
+async function winSchedRefresh() { await _winCommand('win_sched_list', {}); }
+
+async function winSchedCreate() {
+  const name = document.getElementById('win-name').value.trim();
+  const scenId = document.getElementById('win-scenario').value;
+  const time = document.getElementById('win-time').value;
+  const days = [...document.querySelectorAll('.win-day:checked')].map(cb => parseInt(cb.value));
+  if (!name) return alert('Enter a task name.');
+  if (!scenId) return alert('Select a scenario.');
+  if (!days.length) return alert('Select at least one day.');
+  if (!time) return alert('Set a time.');
+  const sc = G.scenarios.find(s => s.id === scenId);
+  await _winCommand('win_sched_create', { name, scenario: sc.name, days, time });
+  document.getElementById('win-name').value = '';
+  document.querySelectorAll('.win-day').forEach(cb => cb.checked = false);
+}
+
+async function winSchedDelete(taskName) {
+  if (!confirm(`Delete Windows scheduled task "${taskName}"?`)) return;
+  await _winCommand('win_sched_delete', { task_name: taskName });
 }
 
 function diffSettings() {
@@ -782,6 +930,7 @@ function renderAll() {
   renderCodes();
   refreshLogSelect();
   renderScan();
+  renderWinTasks();
 }
 
 // ═══════════════════════════════════════════════════════════
