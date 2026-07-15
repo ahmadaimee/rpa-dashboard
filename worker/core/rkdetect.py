@@ -26,7 +26,7 @@ from pathlib import Path
 log = logging.getLogger("worker")
 
 RK_LOG_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "KEYENCE" / "RkScenarioManager" / "Log"
-RECENT_WINDOW_SECS = 36 * 3600
+FRESH_FOLDER_SECS = 120             # folder-without-log only *starts* a run if this fresh
 CPU_ACTIVE_100NS = 1_500_000        # 0.15 s cpu-time between samples (~1.5%/10s)
 QUIET_SAMPLES_TO_END = 6            # ~60 s of silence → consider the run over
 
@@ -89,8 +89,62 @@ def kill_keyence_dotnets(pids: list[int] | None = None):
         log.info("Killed %d Keyence runner process(es)", len(targets))
 
 
+def log_baseline() -> dict:
+    """Snapshot of RunningLog mtimes — take before starting a run."""
+    base = {}
+    if RK_LOG_DIR.is_dir():
+        try:
+            for f in RK_LOG_DIR.glob("*/RunningLog.json"):
+                base[str(f)] = f.stat().st_mtime
+        except Exception:
+            pass
+    return base
+
+
+def wait_run_end(stop_event, baseline: dict, poll_secs: float = 3.0,
+                 quiet_needed: int = 7):
+    """Block until the Keyence run appears finished: a fresh RunningLog write
+    (vs baseline) OR the KEYENCE dotnet runners staying cpu-quiet for
+    ~quiet_needed*poll_secs. Replaces the old 'wait until RkScenarioManager.exe
+    disappears' logic, which never ended when the Keyence app itself was open.
+    """
+    last_cpu: dict[int, int] = {}
+    quiet = 0
+    while not stop_event.is_set():
+        # 1) fresh end-write?
+        if RK_LOG_DIR.is_dir():
+            try:
+                for f in RK_LOG_DIR.glob("*/RunningLog.json"):
+                    key = str(f)
+                    if f.stat().st_mtime > baseline.get(key, 0):
+                        return
+            except Exception:
+                pass
+        # 2) runner processes cpu-quiet?
+        procs = keyence_dotnet_procs()
+        if not procs:
+            return
+        active = any(
+            last_cpu.get(p["pid"]) is not None
+            and p["cputime"] - last_cpu[p["pid"]] > int(CPU_ACTIVE_100NS * poll_secs / 10)
+            for p in procs
+        )
+        last_cpu = {p["pid"]: p["cputime"] for p in procs}
+        quiet = 0 if active else quiet + 1
+        if quiet >= quiet_needed:
+            return
+        time.sleep(poll_secs)
+
+
 class RkMonitor:
     """Stateful detector — call sample() from the heartbeat loop (~10 s)."""
+
+    def force_end(self):
+        """The run was killed by us — report idle immediately."""
+        self._running = False
+        self._quiet = 0
+        self._scenario = None
+        self._active_pids = []
 
     def __init__(self):
         self._last_cpu: dict[int, int] = {}
@@ -134,7 +188,10 @@ class RkMonitor:
                     continue
                 f = d / "RunningLog.json"
                 if not f.exists():
-                    if now - d.stat().st_mtime < RECENT_WINDOW_SECS:
+                    # Start-trigger only when the folder is brand new — an
+                    # aborted/killed run leaves a log-less folder behind, and
+                    # that must not keep signalling "running" for hours.
+                    if now - d.stat().st_mtime < FRESH_FOLDER_SECS:
                         no_log = True
                     continue
                 mtime = f.stat().st_mtime

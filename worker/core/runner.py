@@ -154,6 +154,9 @@ class Runner:
         logs.add(f"▶ Starting on {self.cfg.username}")
         logs.add(f"   Path: {rks}")
 
+        from . import rkdetect
+        log_base = rkdetect.log_baseline()
+
         try:
             proc = subprocess.Popen(
                 [self.cfg.rk_exe, "/RUN", rks],
@@ -213,14 +216,12 @@ class Runner:
 
         proc.wait()
 
-        # Launcher exits early — wait until the engine is completely gone.
-        # Only meaningful when running the real Keyence exe (skipped for
-        # stub executables in tests / config overrides).
+        # Launcher exits early — wait until the run itself finishes: a fresh
+        # RunningLog write or the runner processes going quiet. (The old
+        # "wait until RkScenarioManager.exe disappears" never ended when the
+        # Keyence app was open on the PC.) Skipped for stub exes in tests.
         if os.path.basename(self.cfg.rk_exe).lower() == "rkscenariomanager.exe":
-            while not self._stop_requested.is_set():
-                if not rk_engine_running():
-                    break
-                time.sleep(2)
+            rkdetect.wait_run_end(self._stop_requested, log_base)
 
         stopped.set()
 

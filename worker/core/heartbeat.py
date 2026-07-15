@@ -29,6 +29,7 @@ def set_external_stopped():
     global external_task_id
     with _ext_lock:
         external_task_id = None
+    monitor.force_end()  # report idle on the next heartbeat, not after 60 s
 
 
 def _handle_external(cloud: Cloud, runner: Runner, rk: dict):
