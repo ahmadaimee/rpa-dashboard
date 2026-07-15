@@ -5,6 +5,7 @@ crash the worker loop (mirrors the old worker's tolerance of state.json
 contention). On auth errors we re-sign-in once and retry.
 """
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -18,33 +19,58 @@ def utcnow() -> str:
 
 
 class Cloud:
+    """All Supabase access goes through _safe(): serialized with a lock
+    (supabase-py's sync client is not thread-safe — heartbeat/commands/main
+    threads racing on it caused constant failures), with throttled,
+    backing-off password sign-ins (the old retry-with-relogin pattern
+    hammered /auth/v1/token every couple of seconds → 429 storms that
+    also broke update downloads)."""
+
     def __init__(self, cfg):
         self.cfg = cfg
         self.client = create_client(cfg.supabase_url, cfg.anon_key)
         self._signed_in = False
+        self._lock = threading.RLock()
+        self._signin_at = 0.0        # monotonic time of last sign-in attempt
+        self._signin_backoff = 0.0   # grows on failures/429s
 
     # ── auth ────────────────────────────────────────────────
     def sign_in(self):
-        self.client.auth.sign_in_with_password(
-            {"email": self.cfg.email, "password": self.cfg.password}
-        )
+        with self._lock:
+            self._sign_in_locked()
+
+    def _sign_in_locked(self):
+        wait = self._signin_backoff - (time.monotonic() - self._signin_at)
+        if wait > 0:
+            time.sleep(min(wait, 30))
+        self._signin_at = time.monotonic()
+        try:
+            self.client.auth.sign_in_with_password(
+                {"email": self.cfg.email, "password": self.cfg.password}
+            )
+        except Exception:
+            # exponential backoff — never hammer the auth endpoint again
+            self._signin_backoff = min(max(self._signin_backoff, 5) * 2, 120)
+            raise
+        self._signin_backoff = 10   # even successes are rate-limited
         self._signed_in = True
         log.info("Signed in to Supabase as worker %s", self.cfg.worker_id)
 
     def _safe(self, fn, what: str, default=None):
         """Run a supabase call; on failure try one re-auth + retry, else default."""
-        for attempt in (1, 2):
-            try:
-                if not self._signed_in:
-                    self.sign_in()
-                return fn()
-            except Exception as e:
-                msg = str(e)
-                log.debug("%s failed (attempt %d): %s", what, attempt, msg)
-                if attempt == 1:
-                    self._signed_in = False
-                    time.sleep(1)
-        return default
+        with self._lock:
+            for attempt in (1, 2):
+                try:
+                    if not self._signed_in:
+                        self._sign_in_locked()
+                    return fn()
+                except Exception as e:
+                    log.warning("%s failed (attempt %d): %s",
+                                what, attempt, str(e)[:200])
+                    if attempt == 1:
+                        self._signed_in = False
+                        time.sleep(1)
+            return default
 
     # ── workers ─────────────────────────────────────────────
     def heartbeat(self, status: str, rk: dict, app_version: str):

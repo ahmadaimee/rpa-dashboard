@@ -39,6 +39,9 @@ def _setup_logging(to_file: bool):
         format=f"[%(asctime)s] [{cfgmod.USERNAME}] %(levelname)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # httpx logs every request at INFO — floods the worker log
+    for noisy in ("httpx", "httpcore", "gotrue", "postgrest"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     if to_file:
         try:
             from logging.handlers import RotatingFileHandler
