@@ -186,6 +186,12 @@ def main():
             return
         installer.acquire_instance_lock()
         _set_console_title()
+        # Self-repair the autostart task on every background start — a missing
+        # task broke the post-update restart on a worker PC once.
+        try:
+            installer.install_startup_task()
+        except Exception as e:
+            log.warning("Startup-task self-repair failed: %s", e)
         worker_loop(cfg)
         return
 

@@ -91,8 +91,12 @@ if errorlevel 1 (
 )
 "{sys32}\\schtasks.exe" /run /tn "{TASK_NAME}" >>"{ulog}" 2>&1
 if errorlevel 1 (
-  echo [%date% %time%] schtasks run failed, direct start >> "{ulog}"
-  start "" "{target}" --background
+  echo [%date% %time%] schtasks run failed, trying powershell >> "{ulog}"
+  "{sys32}\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -Command "Start-Process -FilePath '{target}' -ArgumentList '--background'" >>"{ulog}" 2>&1
+  if errorlevel 1 (
+    echo [%date% %time%] powershell failed, trying start >> "{ulog}"
+    start "" "{target}" --background
+  )
 )
 echo [%date% %time%] update bat done >> "{ulog}"
 (goto) 2>nul & del "%~f0"
