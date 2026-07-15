@@ -1,0 +1,102 @@
+name: Publish worker release
+
+# Builds RPA-Bot.exe and publishes it to Supabase whenever worker/version.py
+# carries a version that isn't released yet. Workers then auto-update and the
+# dashboard shows the ⬆ Update buttons — no manual upload needed.
+#
+# Required repo secret: SUPABASE_SERVICE_ROLE_KEY
+#   (Supabase → Project Settings → API keys → legacy service_role)
+
+on:
+  push:
+    branches: [main]
+    paths: ["worker/**"]
+  workflow_dispatch:
+
+env:
+  SUPABASE_URL: https://luuxmkhjoxqdzgjyerbc.supabase.co
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path worker/version.py -Pattern '"([\d.]+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Worker version: $v"
+
+      - name: Check if already released
+        id: check
+        shell: pwsh
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $r = Invoke-RestMethod -Uri "$env:SUPABASE_URL/rest/v1/worker_releases?version=eq.$v&select=version" `
+            -Headers @{ apikey = $env:KEY; Authorization = "Bearer $env:KEY" }
+          if ($r.Count -gt 0) {
+            Write-Host "v$v already released - skipping."
+            "skip=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "skip=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.skip == 'false'
+        with:
+          python-version: "3.12"
+
+      - name: Build exe
+        if: steps.check.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          cd worker
+          pip install -r requirements.txt
+          pyinstaller --onefile --name RPA-Bot --clean --noconfirm `
+            --icon assets\icon.ico --add-data "assets\icon.png;assets" worker.py
+
+      - name: Build installer
+        if: steps.check.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          cd worker
+          $env:RPABOT_VERSION = "${{ steps.ver.outputs.version }}"
+          & "$env:ProgramFiles (x86)\Inno Setup 6\ISCC.exe" /Qp installer.iss
+
+      - name: Publish to Supabase
+        if: steps.check.outputs.skip == 'false'
+        shell: pwsh
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $exe = "worker/dist/RPA-Bot.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          $path = "releases/$v/RPA-Bot.exe"
+
+          Invoke-RestMethod -Method Post `
+            -Uri "$env:SUPABASE_URL/storage/v1/object/worker-releases/$path" `
+            -Headers @{ apikey = $env:KEY; Authorization = "Bearer $env:KEY"; "x-upsert" = "true" } `
+            -ContentType "application/octet-stream" -InFile $exe | Out-Null
+          Write-Host "Uploaded $path"
+
+          Invoke-RestMethod -Method Post -Uri "$env:SUPABASE_URL/rest/v1/worker_releases" `
+            -Headers @{ apikey = $env:KEY; Authorization = "Bearer $env:KEY"; Prefer = "resolution=merge-duplicates" } `
+            -ContentType "application/json" `
+            -Body (@{ version = $v; storage_path = $path; sha256 = $hash } | ConvertTo-Json) | Out-Null
+          Write-Host "Release v$v registered - workers will auto-update."
+
+      - name: Attach artifacts
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: RPA-Bot-v${{ steps.ver.outputs.version }}
+          path: |
+            worker/dist/RPA-Bot.exe
+            worker/dist/RPA-Bot-Setup.exe
