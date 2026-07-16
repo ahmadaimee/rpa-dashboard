@@ -107,6 +107,7 @@ def worker_loop(cfg: cfgmod.Config):
             log.info("Using company scenarios folder: %s", co_folder)
     except Exception:
         pass
+    cloud.cleanup_orphan_running()
     runner = Runner(cloud, cfg)
     cmds = CommandHandler(cloud, cfg, runner)
 
@@ -142,6 +143,12 @@ def worker_loop(cfg: cfgmod.Config):
                     time.sleep(POLL_INTERVAL)
                     continue
                 disabled_logged = False
+
+            # Keyence runs one automation at a time — while a run started
+            # directly on the PC is active, hold the cloud queue.
+            if heartbeat.external_task_id is not None or heartbeat.monitor._running:
+                time.sleep(POLL_INTERVAL)
+                continue
 
             task = cloud.claim_next_task()
             if task:

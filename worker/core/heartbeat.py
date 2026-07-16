@@ -53,6 +53,7 @@ def _handle_external(cloud: Cloud, runner: Runner, rk: dict):
                 log.info("External run resumed → reopened task %s", external_task_id)
                 return
             name = rk["scenario"] or "Keyence scenario (started on PC)"
+            cloud.close_other_running_external()
             task_id = cloud.insert_external_task(name)
             if task_id:
                 external_task_id = task_id

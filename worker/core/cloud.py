@@ -163,6 +163,34 @@ class Cloud:
             "update_task",
         )
 
+    def cleanup_orphan_running(self):
+        """On startup: no task can genuinely be running in a brand-new
+        process — close rows a previous process left behind (a worker
+        restart mid-run used to leave a second 'running' row forever)."""
+        self._safe(
+            lambda: self.client.table("tasks").update({
+                "status": "stopped",
+                "error": "Worker restarted — run tracking was interrupted",
+                "finished_at": utcnow(),
+            }).eq("worker_id", self.cfg.worker_id)
+              .eq("status", "running").execute(),
+            "cleanup_orphan_running",
+        )
+
+    def close_other_running_external(self):
+        """Keyence runs one automation at a time — before opening a new
+        on-PC row, close any external row still marked running."""
+        self._safe(
+            lambda: self.client.table("tasks").update({
+                "status": "stopped",
+                "error": "Superseded — a new run started on this PC",
+                "finished_at": utcnow(),
+            }).eq("worker_id", self.cfg.worker_id)
+              .eq("source", "external")
+              .eq("status", "running").execute(),
+            "close_other_running_external",
+        )
+
     def insert_external_task(self, scenario_name: str) -> str | None:
         res = self._safe(
             lambda: self.client.table("tasks").insert({
