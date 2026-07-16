@@ -42,6 +42,23 @@ def start(cloud, cfg, version: str, dashboard_url: str, runner=None):
     def open_dashboard(icon, item):
         webbrowser.open(dashboard_url)
 
+    def check_updates(icon, item):
+        from . import updater
+        if runner and runner.current_task_id:
+            icon.notify("A scenario is running — the update will apply once idle.", "RPA-Bot")
+            return
+        try:
+            icon.notify("Checking for updates…", "RPA-Bot")
+        except Exception:
+            pass
+        try:
+            # check_and_apply exits the process if a newer version is found;
+            # if we get here there was nothing to update.
+            updater.check_and_apply(cloud, version)
+            icon.notify(f"You are on the latest version (v{version}).", "RPA-Bot")
+        except Exception as e:
+            icon.notify(f"Update check failed: {e}", "RPA-Bot")
+
     def do_exit(icon, item):
         log.info("Exit chosen from tray — shutting down")
         try:
@@ -61,8 +78,10 @@ def start(cloud, cfg, version: str, dashboard_url: str, runner=None):
         _icon_image(),
         f"RPA-Bot — {cfg.username}",
         menu=Menu(
+            # Invisible default → clicking the tray icon opens the dashboard
+            MenuItem("Open Dashboard", open_dashboard, default=True, visible=False),
             MenuItem(status_text, None, enabled=False),
-            MenuItem("Open Dashboard", open_dashboard, default=True),
+            MenuItem("Check for updates", check_updates),
             Menu.SEPARATOR,
             MenuItem("Exit", do_exit),
         ),

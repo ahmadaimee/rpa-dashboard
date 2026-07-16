@@ -17,6 +17,8 @@ from .config import CONFIG_DIR, PID_FILE, USERNAME
 
 log = logging.getLogger("worker")
 
+CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+
 TASK_NAME = f"RPA-Bot-Worker-{USERNAME}"
 
 
@@ -166,7 +168,7 @@ def install_startup_task():
     try:
         r = subprocess.run(
             ["schtasks", "/create", "/tn", TASK_NAME, "/xml", str(xml_path), "/f"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
         )
         if r.returncode == 0:
             log.info("Startup task '%s' installed", TASK_NAME)
@@ -180,7 +182,7 @@ def remove_startup_task():
     if platform.system() != "Windows":
         return
     r = subprocess.run(["schtasks", "/delete", "/tn", TASK_NAME, "/f"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     if r.returncode == 0:
         log.info("Startup task '%s' removed", TASK_NAME)
     else:
@@ -191,7 +193,7 @@ def relaunch_background():
     """Prefer schtasks /run — guarantees the same hidden config as boot."""
     if platform.system() == "Windows":
         r = subprocess.run(["schtasks", "/run", "/tn", TASK_NAME],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         if r.returncode == 0:
             return
         log.warning("schtasks /run failed (%s) — direct spawn", r.stderr.strip())
@@ -214,7 +216,8 @@ def _pid_alive(pid: int) -> bool:
     file matching some unrelated process caused false 'already running'."""
     try:
         out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                             capture_output=True, text=True, timeout=5).stdout
+                             capture_output=True, text=True, timeout=5,
+                             creationflags=CREATE_NO_WINDOW).stdout
         if str(pid) not in out:
             return False
         image = out.strip().split()[0].lower() if out.strip() else ""
@@ -240,7 +243,7 @@ def kill_running_worker() -> bool:
             pid = int(PID_FILE.read_text().strip())
             if pid != os.getpid() and _pid_alive(pid):
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                               capture_output=True)
+                               capture_output=True, creationflags=CREATE_NO_WINDOW)
                 killed = True
         except Exception:
             pass
@@ -265,7 +268,8 @@ def uninstall(cloud=None):
         try:
             pid = int(PID_FILE.read_text().strip())
             if pid != os.getpid() and _pid_alive(pid):
-                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True,
+                               creationflags=CREATE_NO_WINDOW)
                 print(f"  Killed running worker (PID {pid})")
         except Exception:
             pass
