@@ -2,14 +2,13 @@
 
 Shows the RPA-Bot logo in the notification area with:
   - status line (PC + version)
-  - Open Dashboard
+  - Check for updates
   - Exit (marks the worker offline and stops the process)
 """
 import logging
 import os
 import sys
 import threading
-import webbrowser
 from pathlib import Path
 
 from . import config as cfgmod
@@ -38,9 +37,6 @@ def start(cloud, cfg, version: str, dashboard_url: str, runner=None):
     except Exception as e:
         log.warning("Tray unavailable (%s) — continuing without it", e)
         return None
-
-    def open_dashboard(icon, item):
-        webbrowser.open(dashboard_url)
 
     def check_updates(icon, item):
         from . import updater
@@ -78,8 +74,6 @@ def start(cloud, cfg, version: str, dashboard_url: str, runner=None):
         _icon_image(),
         f"RPA-Bot — {cfg.username}",
         menu=Menu(
-            # Invisible default → clicking the tray icon opens the dashboard
-            MenuItem("Open Dashboard", open_dashboard, default=True, visible=False),
             MenuItem(status_text, None, enabled=False),
             MenuItem("Check for updates", check_updates),
             Menu.SEPARATOR,
