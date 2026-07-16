@@ -20,6 +20,12 @@ def _resolve_username(path: str, username: str) -> str:
 
 
 def scan(cloud: Cloud, cfg, folder: str | None = None) -> dict:
+    if folder is None:
+        # default scan → this company's folder (refreshed from the cloud so
+        # dashboard folder changes take effect without a worker restart)
+        co_folder = cloud.company_folder()
+        if co_folder:
+            cfg.scenarios_folder = co_folder
     raw = (folder or cfg.scenarios_folder).strip().rstrip("\\/")
     resolved = _resolve_username(raw, cfg.username)
 

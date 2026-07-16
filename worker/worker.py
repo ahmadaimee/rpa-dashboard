@@ -91,7 +91,22 @@ def parse_args():
 
 def worker_loop(cfg: cfgmod.Config):
     cloud = Cloud(cfg)
-    cloud.sign_in()
+    # Never die on startup because the network/cloud is unavailable — a
+    # startup crash left workers offline until the next logon.
+    while True:
+        try:
+            cloud.sign_in()
+            break
+        except Exception as e:
+            log.warning("Startup sign-in failed (%s) — retrying in 30s", str(e)[:150])
+            time.sleep(30)
+    try:
+        co_folder = cloud.company_folder()
+        if co_folder:
+            cfg.scenarios_folder = co_folder
+            log.info("Using company scenarios folder: %s", co_folder)
+    except Exception:
+        pass
     runner = Runner(cloud, cfg)
     cmds = CommandHandler(cloud, cfg, runner)
 

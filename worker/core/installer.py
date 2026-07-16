@@ -125,6 +125,19 @@ def install_startup_task():
     <LogonTrigger><Enabled>true</Enabled>
       <UserId>{os.environ.get("USERDOMAIN", ".")}\\{USERNAME}</UserId>
     </LogonTrigger>
+    <!-- Watchdog: fires every 5 min; IgnoreNew means while the worker is
+         alive the running task instance makes these ticks no-ops, but if
+         the worker ever dies it is restarted within 5 minutes. -->
+    <CalendarTrigger>
+      <StartBoundary>2020-01-01T00:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>
+      <Repetition>
+        <Interval>PT5M</Interval>
+        <Duration>P1D</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+    </CalendarTrigger>
   </Triggers>
   <Principals>
     <Principal id="Author">

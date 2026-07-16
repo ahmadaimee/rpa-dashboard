@@ -34,6 +34,7 @@ class Cloud:
         self._signin_at = 0.0        # monotonic time of last sign-in attempt
         self._signin_backoff = 0.0   # grows on failures/429s
         self._consec_failures = 0    # self-heal restart when the client is wedged
+        self._last_error = ""
         self._company = None         # this worker's company slug (lazy)
         self._company_loaded = False
 
@@ -70,13 +71,18 @@ class Cloud:
                     self._consec_failures = 0
                     return result
                 except Exception as e:
+                    self._last_error = str(e)
                     log.warning("%s failed (attempt %d): %s",
                                 what, attempt, str(e)[:200])
                     if attempt == 1:
                         self._signed_in = False
                         time.sleep(1)
             self._consec_failures += 1
-            if self._consec_failures >= 30:
+            # Restart only recovers a wedged process (e.g. PyInstaller temp
+            # dir deleted → missing cacert). A plain network outage must NOT
+            # trigger restart loops — we just keep retrying.
+            wedged = "No such file or directory" in (self._last_error or "")
+            if (wedged and self._consec_failures >= 30) or self._consec_failures >= 400:
                 self._self_heal()
             return default
 
@@ -278,6 +284,18 @@ class Cloud:
                 self._company = (res.data or {}).get("company")
                 self._company_loaded = True
         return self._company
+
+    def company_folder(self) -> str | None:
+        """The company's default scenarios folder (may contain {USERNAME})."""
+        co = self.my_company()
+        if not co:
+            return None
+        res = self._safe(
+            lambda: self.client.table("companies").select("scenarios_folder")
+                .eq("slug", co).single().execute(),
+            "company_folder",
+        )
+        return (res.data or {}).get("scenarios_folder") if res else None
 
     def upsert_scenarios(self, entries: list[dict]):
         """entries: [{name, path?}] — rows without 'path' leave any existing

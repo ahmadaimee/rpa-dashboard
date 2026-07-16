@@ -205,7 +205,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
           </p>
           <div class="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono flex-wrap">
             <span class="text-gray-400">Folder:</span>
-            <span class="text-gray-700">C:\Users\</span><span class="text-blue-600">{USERNAME}</span><span class="text-gray-700">\Orchard Medical Management\Automations-PatriotPay - Documents\</span><span class="text-green-600">Scenarios</span>
+            <span id="fetch-folder-display" class="text-gray-700"></span>
           </div>
         </div>
       </div>
@@ -395,11 +395,14 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
         see their own company's PCs, scenarios and tasks (database-level isolation).
       </p>
       <div id="company-list" class="space-y-1 mb-3"></div>
-      <div class="flex gap-3 items-end">
+      <div class="flex flex-wrap gap-3 items-end">
         <div class="flex-1 min-w-[200px]">
           <label class="block text-xs text-gray-500 mb-1">Company Name</label>
-          <input id="co-name" type="text" placeholder="e.g. Orchard Medical" class="w-full px-3 py-2 text-sm"
-            onkeydown="if(event.key==='Enter') addCompany()">
+          <input id="co-name" type="text" placeholder="e.g. Orchard Medical" class="w-full px-3 py-2 text-sm">
+        </div>
+        <div class="flex-[2] min-w-[280px]">
+          <label class="block text-xs text-gray-500 mb-1">Default Scenarios Folder <span class="text-gray-400 font-normal">(use {USERNAME} for the per-PC user)</span></label>
+          <input id="co-folder" type="text" placeholder="C:\Users\{USERNAME}\...\Scenarios" class="w-full px-3 py-2 text-sm font-mono">
         </div>
         <button onclick="addCompany()" class="btn-primary">Add Company</button>
       </div>
@@ -631,7 +634,14 @@ async function startApp() {
 //  Helpers
 // ═══════════════════════════════════════════════════════════
 function isOnline(w) { return w.last_seen && Date.now() - new Date(w.last_seen) < ONLINE_MS; }
-function firstOnlineWorker() { return G.workers.find(isOnline) || G.workers[0] || null; }
+function firstOnlineWorker() {
+  const ws = G.workers.filter(w => coOK(w.company));
+  return ws.find(isOnline) || ws[0] || null;
+}
+function folderTplFor(slug) {
+  return G.companies.find(c => c.slug === slug)?.scenarios_folder
+    || 'C:\\Users\\{USERNAME}\\Orchard Medical Management\\Automations-PatriotPay - Documents\\Scenarios';
+}
 function workerById(id) { return G.workers.find(w => w.id === id); }
 function workerName(id) { const w = workerById(id); return w ? (w.display_name || w.username) : '—'; }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -820,7 +830,7 @@ function diffScenarios() {
     const lastBadge = last ? `<span class="text-xs px-2 py-0.5 rounded-full ${lc.bg} ${lc.text} border ${lc.border}">${last.status}</span>` : '';
     const pathLine = s.path
       ? `<span class="text-blue-600">${esc(s.path)}</span>`
-      : `C:\\Users\\<span class="text-blue-600">{USERNAME}</span>\\Orchard Medical Management\\Automations-PatriotPay - Documents\\Scenarios\\<span class="text-green-600">${esc(s.name)}.rks</span>`;
+      : `${esc(folderTplFor(s.company))}\\<span class="text-green-600">${esc(s.name)}.rks</span>`;
     return { key: s.id, html: `
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-5 py-3 hover:bg-gray-50 transition-colors group">
         <div class="w-7 h-7 rounded bg-blue-50 flex items-center justify-center flex-shrink-0 text-sm border border-blue-100">📄</div>
@@ -843,6 +853,12 @@ function diffScenarios() {
 // ═══════════════════════════════════════════════════════════
 function renderScan() {
   const btn = document.getElementById('scan-btn'); if (!btn) return;
+  const fd = document.getElementById('fetch-folder-display');
+  if (fd) {
+    const co = ctxCompany();
+    fd.textContent = co ? folderTplFor(co)
+      : 'Select a company in the sidebar — each company has its own scenarios folder.';
+  }
   const label = document.getElementById('scan-btn-label');
   const result = document.getElementById('scan-result');
   const hint = document.getElementById('scan-worker-hint');
@@ -1291,22 +1307,33 @@ function renderCompanies() {
     if (sel._last !== opts) { sel.innerHTML = opts; sel._last = opts; }
     sel.value = G.viewCompany;
     document.getElementById('company-list').innerHTML = G.companies.map(c => `
-      <div class="flex items-center gap-3 text-sm">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm py-1">
         <span class="font-medium text-gray-800">${esc(c.name)}</span>
         <span class="text-xs text-gray-400 font-mono">${esc(c.slug)}</span>
         <span class="text-xs text-gray-400">${G.workers.filter(w => w.company === c.slug).length} PC(s)</span>
+        <span class="text-xs text-gray-500 font-mono truncate max-w-full">${esc(c.scenarios_folder || '(no default folder)')}</span>
+        <button onclick="editCompanyFolder('${esc(c.slug)}')" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer">Edit folder</button>
       </div>`).join('') || '<p class="text-xs text-gray-400">No companies yet — add your companies below.</p>';
   }
 }
 
 async function addCompany() {
   const name = document.getElementById('co-name').value.trim();
+  const folder = document.getElementById('co-folder').value.trim() || null;
   if (!name) return alert('Enter a company name.');
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   if (!slug) return alert('The name must contain letters or numbers.');
-  if (await act(sb.from('companies').insert({ slug, name }))) {
+  if (await act(sb.from('companies').insert({ slug, name, scenarios_folder: folder }))) {
     document.getElementById('co-name').value = '';
+    document.getElementById('co-folder').value = '';
   }
+}
+
+async function editCompanyFolder(slug) {
+  const cur = G.companies.find(c => c.slug === slug)?.scenarios_folder || '';
+  const folder = prompt('Default scenarios folder for this company\n(use {USERNAME} for the per-PC user):', cur);
+  if (folder === null) return;
+  await act(sb.from('companies').update({ scenarios_folder: folder.trim() || null }).eq('slug', slug));
 }
 
 async function setWorkerCompany(workerId, slug) {
