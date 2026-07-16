@@ -9,7 +9,7 @@
 
 [Setup]
 AppId={{7E9B2C41-52D3-4C1B-9E63-RPABOT000001}
-AppName=RPA-Bot
+AppName=RPA Agent
 AppVersion={#AppVersion}
 AppPublisher=Orchard Medical Management
 DefaultDirName={localappdata}\Programs\RPA-Bot
@@ -29,11 +29,11 @@ CloseApplications=yes
 Source: "dist\RPA-Bot.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{userprograms}\RPA-Bot"; Filename: "{app}\RPA-Bot.exe"; IconFilename: "{app}\RPA-Bot.exe"
+Name: "{userprograms}\RPA Agent"; Filename: "{app}\RPA-Bot.exe"; IconFilename: "{app}\RPA-Bot.exe"
 
 [Run]
 ; Launch after install — shows the pairing / start menu in a console window
-Filename: "{app}\RPA-Bot.exe"; Description: "Start RPA-Bot now (pairing on first run)"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\RPA-Bot.exe"; Description: "Start RPA Agent now (pairing on first run)"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 ; Stop the worker, remove the scheduled task, clear registration — silently

@@ -73,13 +73,13 @@ def _set_console_title():
     if platform.system() == "Windows":
         try:
             import ctypes
-            ctypes.windll.kernel32.SetConsoleTitleW(f"RPA-Bot [{cfgmod.USERNAME}]")
+            ctypes.windll.kernel32.SetConsoleTitleW(f"RPA Agent [{cfgmod.USERNAME}]")
         except Exception:
             pass
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="RPA-Bot Worker (cloud)")
+    p = argparse.ArgumentParser(description="RPA Agent Worker (cloud)")
     p.add_argument("--background", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--uninstall", action="store_true", help="Remove autostart and stop the worker")
     p.add_argument("--quiet", action="store_true", help="No prompts (used by the setup uninstaller)")
@@ -221,7 +221,7 @@ def main():
     _setup_logging(to_file=False)
     if cfg and installer.is_already_running():
         print()
-        print("  ✅ RPA-Bot Worker is already running in the background.")
+        print("  ✅ RPA Agent is already running in the background.")
         print(f"  This exe: v{__version__}")
         print()
         print("  [Enter] Close   [R] Upgrade — restart the worker using THIS exe")
@@ -238,7 +238,7 @@ def main():
 
     if cfg:
         print()
-        print("  RPA-Bot — this PC is already registered.")
+        print("  RPA Agent — this PC is already registered.")
         print(f"  Registered as: {cfg.display_name} ({cfg.username})")
         print()
         print("  [Enter] Start worker")

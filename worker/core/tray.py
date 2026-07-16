@@ -1,6 +1,6 @@
 """System tray icon for the background worker.
 
-Shows the RPA-Bot logo in the notification area with:
+Shows the RPA Agent logo in the notification area with:
   - status line (PC + version)
   - Check for updates
   - Exit (marks the worker offline and stops the process)
@@ -41,19 +41,19 @@ def start(cloud, cfg, version: str, dashboard_url: str, runner=None):
     def check_updates(icon, item):
         from . import updater
         if runner and runner.current_task_id:
-            icon.notify("A scenario is running — the update will apply once idle.", "RPA-Bot")
+            icon.notify("A scenario is running — the update will apply once idle.", "RPA Agent")
             return
         try:
-            icon.notify("Checking for updates…", "RPA-Bot")
+            icon.notify("Checking for updates…", "RPA Agent")
         except Exception:
             pass
         try:
             # check_and_apply exits the process if a newer version is found;
             # if we get here there was nothing to update.
             updater.check_and_apply(cloud, version)
-            icon.notify(f"You are on the latest version (v{version}).", "RPA-Bot")
+            icon.notify(f"You are on the latest version (v{version}).", "RPA Agent")
         except Exception as e:
-            icon.notify(f"Update check failed: {e}", "RPA-Bot")
+            icon.notify(f"Update check failed: {e}", "RPA Agent")
 
     def do_exit(icon, item):
         log.info("Exit chosen from tray — shutting down")
@@ -66,13 +66,13 @@ def start(cloud, cfg, version: str, dashboard_url: str, runner=None):
 
     def status_text(item):
         running = runner.current_task_id if runner else None
-        return (f"RPA-Bot v{version} — {cfg.username}"
+        return (f"RPA Agent v{version} — {cfg.username}"
                 + (" (running)" if running else " (idle)"))
 
     icon = pystray.Icon(
-        "RPA-Bot",
+        "RPA Agent",
         _icon_image(),
-        f"RPA-Bot — {cfg.username}",
+        f"RPA Agent — {cfg.username}",
         menu=Menu(
             MenuItem(status_text, None, enabled=False),
             MenuItem("Check for updates", check_updates),

@@ -32,7 +32,7 @@ def _fail(op: str, r: subprocess.CompletedProcess):
     err = (r.stderr or r.stdout or "").strip()[:200]
     if "denied" in err.lower():
         err += (" — Hint: this PC restricts Task Scheduler for this account. "
-                "Run RPA-Bot once as administrator, or use a Cloud Schedule "
+                "Run RPA Agent once as administrator, or use a Cloud Schedule "
                 "(single scenario) instead — it needs no Windows permissions.")
     raise RuntimeError(f"schtasks {op} failed: {err}")
 

@@ -52,7 +52,7 @@ def register(supabase_url: str, anon_key: str, code: str,
 def interactive_install(supabase_url: str, anon_key: str, app_version: str):
     print()
     print("  +----------------------------------------------+")
-    print("  |     RPA-Bot — Worker Setup                   |")
+    print("  |     RPA Agent — Worker Setup                  |")
     print("  +----------------------------------------------+")
     print(f"  PC / User : {USERNAME} @ {socket.gethostname()}")
     print()
@@ -122,7 +122,7 @@ def install_startup_task():
     workdir = str(Path(cfgmod.exe_path()).parent)
     xml = f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>RPA-Bot Worker — {USERNAME}</Description></RegistrationInfo>
+  <RegistrationInfo><Description>RPA Agent — {USERNAME}</Description></RegistrationInfo>
   <Triggers>
     <LogonTrigger><Enabled>true</Enabled>
       <UserId>{os.environ.get("USERDOMAIN", ".")}\\{USERNAME}</UserId>
@@ -260,7 +260,7 @@ def acquire_instance_lock():
 
 # ── uninstall ────────────────────────────────────────────────
 def uninstall(cloud=None):
-    print("\n  RPA-Bot — Uninstaller")
+    print("\n  RPA Agent — Uninstaller")
     print("  =====================")
     remove_startup_task()
     # Kill a running background worker
