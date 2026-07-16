@@ -35,9 +35,17 @@ def scan(cloud: Cloud, cfg, folder: str | None = None) -> dict:
         log.error("Scan error: %s", msg)
         return {"error": msg, "found": [], "total": 0, "folder": resolved}
 
-    files = sorted(Path(resolved).rglob("*.rks"), key=lambda p: str(p).lower())
-    rows, names = [], []
+    # Shallowest first: a top-level file wins over a same-named copy in a
+    # subfolder, and duplicates are skipped — two rows with the same
+    # (company, name) in one upsert batch are a Postgres error (21000).
+    files = sorted(Path(resolved).rglob("*.rks"),
+                   key=lambda p: (len(p.relative_to(resolved).parts), str(p).lower()))
+    rows, names, seen = [], [], set()
     for p in files:
+        if p.stem.lower() in seen:
+            log.info("Scan: duplicate scenario name skipped: %s", p)
+            continue
+        seen.add(p.stem.lower())
         rel = p.relative_to(resolved)
         names.append(p.stem)
         if folder or rel.parent != Path("."):
