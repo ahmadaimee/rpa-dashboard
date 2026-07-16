@@ -134,6 +134,13 @@ class Runner:
         finally:
             logs.flush()
             self.current_task_id = None
+            # Our run is over — reset the external-run monitor so residual
+            # Keyence activity doesn't spawn a phantom on-PC task row
+            try:
+                from . import heartbeat
+                heartbeat.monitor.force_end()
+            except Exception:
+                pass
 
     def _fail(self, task_id: str, logs: LogBatcher, msg: str):
         log.error(msg)
@@ -156,6 +163,7 @@ class Runner:
 
         from . import rkdetect
         log_base = rkdetect.log_baseline()
+        run_started_ts = time.time()
 
         try:
             proc = subprocess.Popen(
@@ -228,6 +236,14 @@ class Runner:
         if self._stop_requested.is_set():
             stop_thread.join(timeout=15)  # let watch_stop finish writing 'stopped'
             return
+
+        # Surface Keyence's own error dumps in the task logs (informational —
+        # the launcher exit code still decides the status)
+        try:
+            for m in rkdetect.new_error_logs(run_started_ts - 5)[:20]:
+                logs.add(f"[Keyence error] {m}")
+        except Exception:
+            pass
 
         exit_code = proc.returncode
         ok = exit_code == 0

@@ -26,6 +26,7 @@ from pathlib import Path
 log = logging.getLogger("worker")
 
 RK_LOG_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "KEYENCE" / "RkScenarioManager" / "Log"
+RK_ERR_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "KEYENCE" / "RkScenarioManager" / "ApplicationErrorLog"
 FRESH_FOLDER_SECS = 120             # folder-without-log only *starts* a run if this fresh
 CPU_RATE_100NS_PER_SEC = 150_000    # ≥1.5% of one core = "actively executing"
 QUIET_SECS_TO_END = 45              # this long with no activity → run is over
@@ -87,6 +88,29 @@ def kill_keyence_dotnets(pids: list[int] | None = None):
                        capture_output=True, creationflags=CREATE_NO_WINDOW)
     if targets:
         log.info("Killed %d Keyence runner process(es)", len(targets))
+
+
+def new_error_logs(since_ts: float) -> list[str]:
+    r"""Keyence writes one ApplicationErrorLog\RK_*.txt per error — return the
+    [Message] lines of files created since `since_ts` (a run's start time)."""
+    msgs = []
+    if not RK_ERR_DIR.is_dir():
+        return msgs
+    try:
+        for f in sorted(RK_ERR_DIR.glob("RK_*.txt"), key=lambda x: x.stat().st_mtime):
+            if f.stat().st_mtime < since_ts:
+                continue
+            try:
+                text = f.read_text(encoding="utf-8-sig", errors="ignore")
+                m = re.search(r"\[Message\]\s*\n(.+?)(?:\n\s*\n|\n\[)", text, re.S)
+                msg = (m.group(1).strip() if m else text.strip()[:200]).replace("\r", "")
+                t = re.search(r"\[Type\]\s*\n(\S+)", text)
+                msgs.append((f"{t.group(1)}: " if t else "") + msg[:300])
+            except Exception:
+                continue
+    except Exception as e:
+        log.debug("new_error_logs error: %s", e)
+    return msgs
 
 
 def log_baseline() -> dict:
@@ -157,6 +181,8 @@ class RkMonitor:
         self._scenario: str | None = None
         self._active_pids: list[int] = []
         self._primed = False
+        self._run_started_ts: float = 0.0    # wall clock, for error-log window
+        self._ended_interrupted = False
 
     # ── helpers ─────────────────────────────────────────────
     def _refresh_hash_names(self, force=False):
@@ -176,12 +202,16 @@ class RkMonitor:
         except Exception as e:
             log.debug("hash map refresh error: %s", e)
 
-    def _scan_logs(self) -> tuple[bool, str | None]:
-        """Returns (folder_without_log, just_ended_name)."""
+    def _scan_logs(self) -> tuple[bool, str | None, str | None]:
+        """Returns (folder_without_log, just_ended_name, just_started_name).
+        A fresh RunningLog write WITH EndTime = the run finished; a fresh
+        write WITHOUT EndTime = the run just started (gives its name early
+        and must not be mistaken for an end)."""
         no_log = False
         ended_name = None
+        started_name = None
         if not RK_LOG_DIR.is_dir():
-            return no_log, ended_name
+            return no_log, ended_name, started_name
         now = time.time()
         try:
             for d in RK_LOG_DIR.iterdir():
@@ -199,23 +229,23 @@ class RkMonitor:
                 key = str(f)
                 prev = self._known_logs.get(key)
                 self._known_logs[key] = mtime
-                # fresh write since the previous sample = a run just ended
-                if self._primed and prev is not None and mtime > prev:
+                # fresh write since the previous sample
+                if self._primed and (prev is None or mtime > prev):
                     try:
-                        s = _SCEN_RE.search(f.read_text(encoding="utf-8", errors="ignore"))
-                        ended_name = _scenario_name(s.group(1)) if s else ended_name
-                    except Exception:
-                        pass
-                elif self._primed and prev is None:
-                    # brand-new log file (first run of a scenario) also = ended
-                    try:
-                        s = _SCEN_RE.search(f.read_text(encoding="utf-8", errors="ignore"))
-                        ended_name = _scenario_name(s.group(1)) if s else ended_name
+                        text = f.read_text(encoding="utf-8", errors="ignore")
+                        m = _SCEN_RE.search(text)
+                        name = _scenario_name(m.group(1)) if m else None
+                        if _END_RE.search(text):
+                            ended_name = name or ended_name
+                            self._ended_interrupted = bool(
+                                re.search(r'"IsInterruption"\s*:\s*true', text))
+                        else:
+                            started_name = name or started_name
                     except Exception:
                         pass
         except Exception as e:
             log.debug("log scan error: %s", e)
-        return no_log, ended_name
+        return no_log, ended_name, started_name
 
     # ── main entry ──────────────────────────────────────────
     def sample(self) -> dict:
@@ -236,7 +266,7 @@ class RkMonitor:
                 active_pids.append(p["pid"])
         self._last_cpu = {p["pid"]: p["cputime"] for p in procs}
 
-        no_log, ended_name = self._scan_logs()
+        no_log, ended_name, started_name = self._scan_logs()
         cpu_active = bool(active_pids)
         was_running = self._running
         event = None
@@ -245,20 +275,26 @@ class RkMonitor:
             # first sample: just prime baselines, never signal
             self._primed = True
         elif not self._running:
-            if cpu_active or no_log:
+            if cpu_active or no_log or started_name:
                 self._running = True
                 self._quiet_since = None
+                self._run_started_ts = time.time()
+                self._ended_interrupted = False
                 self._active_pids = active_pids
-                self._refresh_hash_names()
-                name = None
-                for p in procs:
-                    if p["pid"] in active_pids and p["hash"] in self._hash_names:
-                        name = self._hash_names[p["hash"]]
-                        break
+                name = started_name
+                if not name:
+                    self._refresh_hash_names()
+                    for p in procs:
+                        if p["pid"] in active_pids and p["hash"] in self._hash_names:
+                            name = self._hash_names[p["hash"]]
+                            break
                 self._scenario = name
                 event = "started"
         else:
             self._active_pids = active_pids or self._active_pids
+            if started_name:
+                self._scenario = started_name  # better name became available
+                self._quiet_since = None
             if ended_name is not None:
                 self._running = False
                 self._scenario = ended_name  # final, accurate name
@@ -278,6 +314,11 @@ class RkMonitor:
             "scenario": self._scenario,
             "event": event,
             "ended_name": ended_name,
+            # 'log' = Keyence wrote its end-log (definitive); 'quiet' = we
+            # merely stopped seeing activity (a long Wait step can fake this)
+            "end_reason": ("log" if ended_name is not None else "quiet") if event == "ended" else None,
+            "interrupted": self._ended_interrupted if event == "ended" else False,
+            "errors": new_error_logs(self._run_started_ts - 5) if event == "ended" else [],
             "active_pids": list(self._active_pids),
             "was_running": was_running,
         }
