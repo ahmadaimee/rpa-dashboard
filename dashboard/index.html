@@ -270,7 +270,7 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
   <div id="view-schedules" class="hidden">
     <div class="card p-5 mb-4">
       <h2 class="text-base font-semibold text-gray-900 mb-1">➕ New Cloud Schedule</h2>
-      <p class="text-xs text-gray-500 mb-4">Evaluated in the cloud — works even when this dashboard is closed, and needs no Windows permissions on the PC. Choose <strong class="text-gray-700">Run All</strong> or a <strong class="text-gray-700">single scenario on a specific PC</strong>.</p>
+      <p class="text-xs text-gray-500 mb-4">Evaluated in the cloud — works even when this dashboard is closed, and needs no Windows permissions on the PC. Choose <strong class="text-gray-700">Run All</strong>, a <strong class="text-gray-700">single scenario on a specific PC</strong>, or a <strong class="text-gray-700">hand-picked set of scenarios</strong>.</p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Schedule Name</label>
@@ -281,11 +281,16 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
           <select id="cs-kind" onchange="csKindChanged()" class="w-full px-3 py-2 text-sm">
             <option value="run_all">Run All (round-robin across online PCs)</option>
             <option value="scenario">Single scenario on a PC</option>
+            <option value="multi">Selected scenarios</option>
           </select>
         </div>
         <div id="cs-scenario-row" class="hidden">
           <label class="block text-xs text-gray-500 mb-1">Scenario</label>
           <select id="cs-scenario" class="w-full px-3 py-2 text-sm"></select>
+        </div>
+        <div id="cs-multi-row" class="hidden md:col-span-2">
+          <label class="block text-xs text-gray-500 mb-1">Scenarios <span class="text-gray-400 font-normal">(pick one or more — round-robin across online PCs unless a PC is chosen)</span></label>
+          <div id="cs-multi-list" class="max-h-48 overflow-y-auto border border-gray-200 rounded p-2 grid grid-cols-1 sm:grid-cols-2 gap-1"></div>
         </div>
         <div id="cs-pc-row" class="hidden">
           <label class="block text-xs text-gray-500 mb-1">Run on PC <span class="text-gray-400 font-normal">(optional — first online if empty)</span></label>
@@ -925,12 +930,24 @@ function refreshSelects() {
   if (csPc._last !== csPcOpts) { const v = csPc.value; csPc.innerHTML = csPcOpts; csPc._last = csPcOpts; if (v) csPc.value = v; }
   const csScen = document.getElementById('cs-scenario');
   if (csScen._last !== scenOpts) { const v = csScen.value; csScen.innerHTML = scenOpts; csScen._last = scenOpts; if (v) csScen.value = v; }
+  const multiList = document.getElementById('cs-multi-list');
+  const multiOpts = visS.map(s => `
+    <label class="flex items-center gap-2 text-sm text-gray-700 px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
+      <input type="checkbox" value="${esc(s.name)}" class="cs-multi-scen"><span class="truncate">${esc(s.name)}</span>
+    </label>`).join('');
+  if (multiList._last !== multiOpts) {
+    const checked = new Set([...multiList.querySelectorAll('.cs-multi-scen:checked')].map(cb => cb.value));
+    multiList.innerHTML = multiOpts;
+    multiList._last = multiOpts;
+    multiList.querySelectorAll('.cs-multi-scen').forEach(cb => { if (checked.has(cb.value)) cb.checked = true; });
+  }
 }
 
 function csKindChanged() {
-  const isScenario = document.getElementById('cs-kind').value === 'scenario';
-  document.getElementById('cs-scenario-row').classList.toggle('hidden', !isScenario);
-  document.getElementById('cs-pc-row').classList.toggle('hidden', !isScenario);
+  const kind = document.getElementById('cs-kind').value;
+  document.getElementById('cs-scenario-row').classList.toggle('hidden', kind !== 'scenario');
+  document.getElementById('cs-multi-row').classList.toggle('hidden', kind !== 'multi');
+  document.getElementById('cs-pc-row').classList.toggle('hidden', kind === 'run_all');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1194,11 +1211,20 @@ function diffSchedules() {
   diffList(list, visSched.map(s => {
     const days = (s.days || []).map(d => DAY_NAMES[d]).join(', ') || 'No days';
     const last = s.last_fired_at ? new Date(s.last_fired_at).toLocaleString() : 'Never';
+    let what;
+    if (s.kind === 'scenario') {
+      what = `▶ ${esc(s.scenario_name || '?')} on ${esc(s.worker_id ? workerName(s.worker_id) : 'first online PC')}`;
+    } else if (s.kind === 'multi') {
+      const n = (s.scenario_names || []).length;
+      what = `▶ ${n} scenario${n !== 1 ? 's' : ''} (${esc((s.scenario_names || []).join(', '))}) on ${esc(s.worker_id ? workerName(s.worker_id) : 'online PCs, round-robin')}`;
+    } else {
+      what = '▶▶ Run All';
+    }
     return { key: s.id, html: `
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-5 py-3 hover:bg-gray-50 transition-colors">
         <div class="flex-1 min-w-0">
           <p class="text-sm font-medium text-gray-900">${esc(s.name)}
-            <span class="ml-1 text-xs font-normal ${s.kind === 'scenario' ? 'text-purple-600' : 'text-blue-600'}">${s.kind === 'scenario' ? `▶ ${esc(s.scenario_name || '?')} on ${esc(s.worker_id ? workerName(s.worker_id) : 'first online PC')}` : '▶▶ Run All'}</span></p>
+            <span class="ml-1 text-xs font-normal ${s.kind === 'run_all' ? 'text-blue-600' : 'text-purple-600'}">${what}</span></p>
           <p class="text-xs text-gray-500 mt-0.5">${days} at <span class="font-mono text-blue-600">${String(s.run_time).slice(0,5)}</span> <span class="text-gray-400">(${esc(s.timezone)})</span></p>
           <p class="text-xs text-gray-400 mt-0.5">Last run: ${last}${s.last_count != null ? ` · ${s.last_count} task(s)` : ''}</p>
         </div>
@@ -1631,11 +1657,17 @@ async function addSchedule() {
     if (!scenId) return alert('Select a scenario.');
     row.scenario_name = G.scenarios.find(s => s.id === scenId).name;
     row.worker_id = document.getElementById('cs-pc').value || null;
+  } else if (kind === 'multi') {
+    const names = [...document.querySelectorAll('.cs-multi-scen:checked')].map(cb => cb.value);
+    if (!names.length) return alert('Select at least one scenario.');
+    row.scenario_names = names;
+    row.worker_id = document.getElementById('cs-pc').value || null;
   }
   if (await act(sb.from('schedules').insert(row))) {
     document.getElementById('sched-name').value = '';
     document.getElementById('sched-time').value = '00:00';
     document.querySelectorAll('.sched-day').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.cs-multi-scen').forEach(cb => cb.checked = false);
   }
 }
 

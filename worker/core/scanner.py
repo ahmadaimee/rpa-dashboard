@@ -1,9 +1,10 @@
 """Scenario folder scan — reports local .rks files to the cloud library.
 
-Default scan targets the OneDrive Scenarios folder (names only — path
-resolved per PC at runtime). A custom-folder scan stores each file's full
-path on the scenario row; a literal {USERNAME} in the given path is kept
-in the stored path so it still resolves per-PC at run time.
+Scans recursively (subfolders included). Default-scan files at the folder
+root are reported by name only (path resolved per PC at runtime); files in
+subfolders and all custom-folder scans store the full path on the scenario
+row. A literal {USERNAME} in the folder is kept in stored paths so they
+still resolve per-PC at run time.
 """
 import logging
 import os
@@ -34,12 +35,18 @@ def scan(cloud: Cloud, cfg, folder: str | None = None) -> dict:
         log.error("Scan error: %s", msg)
         return {"error": msg, "found": [], "total": 0, "folder": resolved}
 
-    names = sorted((p.stem for p in Path(resolved).glob("*.rks")), key=str.lower)
-    if folder:
-        # Custom folder → store full path per scenario (placeholder preserved)
-        rows = [{"name": n, "path": os.path.join(raw, n + ".rks")} for n in names]
-    else:
-        rows = [{"name": n} for n in names]
+    files = sorted(Path(resolved).rglob("*.rks"), key=lambda p: str(p).lower())
+    rows, names = [], []
+    for p in files:
+        rel = p.relative_to(resolved)
+        names.append(p.stem)
+        if folder or rel.parent != Path("."):
+            # Custom scan, or a file inside a subfolder → store the full path
+            # (with any {USERNAME} placeholder preserved) so the runner can
+            # find it; top-level default-folder files stay name-only.
+            rows.append({"name": p.stem, "path": os.path.join(raw, str(rel))})
+        else:
+            rows.append({"name": p.stem})
 
     cloud.upsert_scenarios(rows)
     log.info("Scan: %d scenario(s) reported from %s", len(names), resolved)

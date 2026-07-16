@@ -69,6 +69,23 @@ def _hide_console():
             pass
 
 
+def _keep_system_awake():
+    """Block automatic sleep (incl. Modern Standby) while the worker runs —
+    a sleeping PC stops heartbeating and shows offline in the dashboard, and
+    misses its scheduled runs. Display may still turn off (ES_DISPLAY_REQUIRED
+    is intentionally not set)."""
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            ES_CONTINUOUS = 0x80000000
+            ES_SYSTEM_REQUIRED = 0x00000001
+            if ctypes.windll.kernel32.SetThreadExecutionState(
+                    ES_CONTINUOUS | ES_SYSTEM_REQUIRED) == 0:
+                log.warning("SetThreadExecutionState failed — PC may sleep while idle")
+        except Exception as e:
+            log.warning("Keep-awake setup failed: %s", e)
+
+
 def _set_console_title():
     if platform.system() == "Windows":
         try:
@@ -214,6 +231,9 @@ def main():
             installer.install_startup_task()
         except Exception as e:
             log.warning("Startup-task self-repair failed: %s", e)
+        # Must be called from this (main) thread — the ES_CONTINUOUS request
+        # lives only as long as the calling thread, and worker_loop keeps it alive.
+        _keep_system_awake()
         worker_loop(cfg)
         return
 
