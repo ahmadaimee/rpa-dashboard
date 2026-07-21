@@ -15,6 +15,9 @@ from .cloud import Cloud
 
 log = logging.getLogger("worker")
 
+# Subfolder names whose .rks files are excluded from the library
+ARCHIVE_DIRS = {"archive", "archived", "archives"}
+
 
 def _resolve_username(path: str, username: str) -> str:
     return re.sub(r"(?i)\{\s*username\s*\}", username, path)
@@ -42,6 +45,10 @@ def scan(cloud: Cloud, cfg, folder: str | None = None) -> dict:
                    key=lambda p: (len(p.relative_to(resolved).parts), str(p).lower()))
     rows, names, seen = [], [], set()
     for p in files:
+        rel_parts = p.relative_to(resolved).parts[:-1]
+        if any(d.lower() in ARCHIVE_DIRS for d in rel_parts):
+            log.info("Scan: archived scenario skipped: %s", p)
+            continue
         if p.stem.lower() in seen:
             log.info("Scan: duplicate scenario name skipped: %s", p)
             continue

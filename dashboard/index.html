@@ -51,6 +51,25 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
 }
 .sched-day-lbl input:checked + span { background:#0078d4; border-color:#0078d4; color:#fff; }
 
+/* Searchable combobox */
+.combo-panel {
+  position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:50;
+  background:#fff; border:1px solid #e0e3e8; border-radius:8px;
+  box-shadow:0 8px 24px rgba(16,24,40,.12), 0 2px 6px rgba(16,24,40,.06);
+  max-height:260px; overflow-y:auto; padding:4px;
+}
+.combo-item {
+  display:flex; align-items:center; gap:.5rem; width:100%;
+  padding:.45rem .65rem; border-radius:6px; font-size:.8125rem;
+  color:#374151; cursor:pointer; user-select:none;
+}
+.combo-item:hover, .combo-item.combo-active { background:#eef6fd; color:#0b5aa0; }
+.combo-item.combo-selected { background:#0078d4; color:#fff; font-weight:500; }
+.combo-item mark { background:transparent; color:#0078d4; font-weight:700; }
+.combo-item.combo-selected mark { color:#fff; text-decoration:underline; }
+.combo-empty { padding:.9rem .65rem; font-size:.8125rem; color:#9ca3af; text-align:center; }
+.combo-count { padding:.3rem .65rem .15rem; font-size:.6875rem; color:#9ca3af; text-transform:uppercase; letter-spacing:.03em; }
+
 ::-webkit-scrollbar { width:5px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:3px; }
@@ -164,10 +183,18 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
     <div class="card p-5 mb-4">
       <h2 class="text-sm font-semibold text-gray-500 mb-3">▶ Run Single Scenario</h2>
       <div class="flex flex-wrap gap-3 items-end">
-        <div class="flex-1 min-w-[200px]">
-          <select id="sel-scenario" class="w-full px-3 py-2 text-sm">
-            <option value="">— Select scenario —</option>
-          </select>
+        <div class="flex-1 min-w-[220px] relative" id="scen-combo">
+          <input type="hidden" id="sel-scenario" value="">
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">🔍</span>
+            <input type="text" id="scen-combo-input" class="w-full pl-9 pr-16 py-2 text-sm" placeholder="Search & select scenario…"
+              autocomplete="off" spellcheck="false"
+              onfocus="scenComboOpen()" oninput="scenComboFilter()" onkeydown="scenComboKey(event)">
+            <button type="button" id="scen-combo-clear" onclick="scenComboClear()"
+              class="hidden absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm cursor-pointer leading-none px-1">✕</button>
+            <span id="scen-combo-chevron" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none transition-transform duration-150">▾</span>
+          </div>
+          <div id="scen-combo-list" class="hidden combo-panel fade-in"></div>
         </div>
         <div class="w-44"><select id="sel-pc" class="w-full px-3 py-2 text-sm"></select></div>
         <button onclick="submitTask()" class="btn-primary">Run ▶</button>
@@ -268,8 +295,8 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
 
   <!-- ═══ SCHEDULES ═══ -->
   <div id="view-schedules" class="hidden">
-    <div class="card p-5 mb-4">
-      <h2 class="text-base font-semibold text-gray-900 mb-1">➕ New Cloud Schedule</h2>
+    <div class="card p-5 mb-4" id="sched-form-card">
+      <h2 class="text-base font-semibold text-gray-900 mb-1" id="sched-form-title">➕ New Cloud Schedule</h2>
       <p class="text-xs text-gray-500 mb-4">Evaluated in the cloud — works even when this dashboard is closed, and needs no Windows permissions on the PC. Choose <strong class="text-gray-700">Run All</strong>, a <strong class="text-gray-700">single scenario on a specific PC</strong>, or a <strong class="text-gray-700">hand-picked set of scenarios</strong>.</p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -313,7 +340,11 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
           <input id="sched-time" type="time" value="00:00" class="w-full px-3 py-2 text-sm">
         </div>
       </div>
-      <button onclick="addSchedule()" class="btn-primary mt-4">Add Schedule</button>
+      <div class="flex gap-2 mt-4">
+        <button onclick="addSchedule()" id="sched-form-btn" class="btn-primary">Add Schedule</button>
+        <button onclick="cancelEditSched()" id="sched-form-cancel"
+          class="hidden text-sm text-gray-500 hover:text-gray-700 border border-gray-300 rounded px-4 py-1.5 cursor-pointer transition-colors">Cancel</button>
+      </div>
     </div>
     <div class="card overflow-hidden mb-4">
       <h2 class="text-sm font-semibold text-gray-700 px-5 py-3 border-b border-gray-200 bg-gray-50">Active Schedules</h2>
@@ -908,6 +939,118 @@ function renderScan() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Scenario combobox (searchable dropdown)
+// ═══════════════════════════════════════════════════════════
+const SCOMBO = { items: [], filtered: [], active: -1, open: false };
+
+function scenComboSync(items) {
+  SCOMBO.items = items;
+  const hid = document.getElementById('sel-scenario');
+  const inp = document.getElementById('scen-combo-input');
+  if (hid.value) {
+    const cur = items.find(s => s.id === hid.value);
+    if (!cur) { hid.value = ''; inp.value = ''; }
+    else if (document.activeElement !== inp) inp.value = cur.name;
+  }
+  document.getElementById('scen-combo-clear').classList.toggle('hidden', !hid.value);
+  if (SCOMBO.open) scenComboRender(inp.value.trim());
+}
+
+function scenComboOpen() {
+  const inp = document.getElementById('scen-combo-input');
+  SCOMBO.open = true;
+  inp.select();
+  document.getElementById('scen-combo-chevron').style.transform = 'translateY(-50%) rotate(180deg)';
+  scenComboRender('');
+}
+
+function scenComboClose(revert = true) {
+  if (!SCOMBO.open) return;
+  SCOMBO.open = false; SCOMBO.active = -1;
+  document.getElementById('scen-combo-list').classList.add('hidden');
+  document.getElementById('scen-combo-chevron').style.transform = 'translateY(-50%)';
+  if (revert) {
+    const hid = document.getElementById('sel-scenario');
+    const cur = SCOMBO.items.find(s => s.id === hid.value);
+    document.getElementById('scen-combo-input').value = cur ? cur.name : '';
+  }
+}
+
+function scenComboFilter() {
+  SCOMBO.active = -1;
+  scenComboRender(document.getElementById('scen-combo-input').value.trim());
+}
+
+function scenComboRender(q) {
+  const list = document.getElementById('scen-combo-list');
+  const selId = document.getElementById('sel-scenario').value;
+  const ql = q.toLowerCase();
+  SCOMBO.filtered = ql ? SCOMBO.items.filter(s => s.name.toLowerCase().includes(ql)) : SCOMBO.items;
+  const hi = name => {
+    if (!ql) return esc(name);
+    const i = name.toLowerCase().indexOf(ql);
+    return esc(name.slice(0, i)) + '<mark>' + esc(name.slice(i, i + q.length)) + '</mark>' + esc(name.slice(i + q.length));
+  };
+  if (!SCOMBO.items.length) {
+    list.innerHTML = '<div class="combo-empty">No scenarios in library</div>';
+  } else if (!SCOMBO.filtered.length) {
+    list.innerHTML = `<div class="combo-empty">No match for “${esc(q)}”</div>`;
+  } else {
+    list.innerHTML =
+      `<div class="combo-count">${SCOMBO.filtered.length} scenario${SCOMBO.filtered.length === 1 ? '' : 's'}</div>` +
+      SCOMBO.filtered.map((s, i) => `
+        <div class="combo-item${s.id === selId ? ' combo-selected' : ''}${i === SCOMBO.active ? ' combo-active' : ''}"
+          data-i="${i}" onmousedown="event.preventDefault();scenComboPick(${i})">
+          <span>📄</span><span class="truncate">${hi(s.name)}</span>
+          ${s.id === selId ? '<span class="ml-auto">✓</span>' : ''}
+        </div>`).join('');
+  }
+  list.classList.remove('hidden');
+}
+
+function scenComboPick(i) {
+  const s = SCOMBO.filtered[i];
+  if (!s) return;
+  document.getElementById('sel-scenario').value = s.id;
+  document.getElementById('scen-combo-input').value = s.name;
+  document.getElementById('scen-combo-clear').classList.remove('hidden');
+  scenComboClose(false);
+}
+
+function scenComboClear() {
+  document.getElementById('sel-scenario').value = '';
+  document.getElementById('scen-combo-input').value = '';
+  document.getElementById('scen-combo-clear').classList.add('hidden');
+  scenComboClose(false);
+}
+
+function scenComboKey(e) {
+  if (e.key === 'Escape') { scenComboClose(); e.target.blur(); return; }
+  if (!SCOMBO.open && (e.key === 'ArrowDown' || e.key === 'Enter')) { scenComboOpen(); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = SCOMBO.filtered.length;
+    if (!n) return;
+    SCOMBO.active = e.key === 'ArrowDown'
+      ? (SCOMBO.active + 1) % n
+      : (SCOMBO.active - 1 + n) % n;
+    scenComboRender(e.target.value.trim());
+    const el = document.querySelector('#scen-combo-list .combo-active');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    scenComboPick(SCOMBO.active >= 0 ? SCOMBO.active : 0);
+  } else if (e.key === 'Tab') {
+    scenComboClose();
+  }
+}
+
+document.addEventListener('mousedown', e => {
+  const combo = document.getElementById('scen-combo');
+  if (combo && !combo.contains(e.target)) scenComboClose();
+});
+
+// ═══════════════════════════════════════════════════════════
 //  Selects / Settings / Schedules / Logs
 // ═══════════════════════════════════════════════════════════
 function refreshSelects() {
@@ -919,8 +1062,7 @@ function refreshSelects() {
     visS.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   const selPc = document.getElementById('sel-pc');
   if (selPc._last !== pcOpts) { const v = selPc.value; selPc.innerHTML = pcOpts; selPc._last = pcOpts; if (v) selPc.value = v; }
-  const selScen = document.getElementById('sel-scenario');
-  if (selScen._last !== scenOpts) { const v = selScen.value; selScen.innerHTML = scenOpts; selScen._last = scenOpts; if (v) selScen.value = v; }
+  scenComboSync(visS);
   const winPc = document.getElementById('win-sel-pc');
   if (winPc._last !== pcOpts) { const v = winPc.value; winPc.innerHTML = pcOpts; winPc._last = pcOpts; if (v) winPc.value = v; }
   const winScen = document.getElementById('win-scenario');
@@ -1231,6 +1373,7 @@ function diffSchedules() {
           <p class="text-xs text-gray-400 mt-0.5">Last run: ${last}${s.last_count != null ? ` · ${s.last_count} task(s)` : ''}</p>
         </div>
         <button onclick="toggleSched('${s.id}', ${!s.enabled})" class="text-xs px-3 py-1 rounded flex-shrink-0 border cursor-pointer ${s.enabled ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}">${s.enabled ? 'Enabled' : 'Disabled'}</button>
+        <button onclick="editSched('${s.id}')" class="text-xs px-3 py-1 rounded flex-shrink-0 border cursor-pointer bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 transition-colors">✏️ Edit</button>
         <button onclick="deleteSched('${s.id}')" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0 cursor-pointer">Delete</button>
       </div>` };
   }));
@@ -1644,6 +1787,49 @@ async function revokeCode(code) {
 }
 
 // -- Schedules --
+let EDIT_SCHED_ID = null;
+
+function editSched(id) {
+  const s = G.schedules.find(x => x.id === id);
+  if (!s) return;
+  EDIT_SCHED_ID = id;
+  document.getElementById('sched-name').value = s.name || '';
+  document.getElementById('sched-time').value = String(s.run_time || '00:00').slice(0, 5);
+  document.getElementById('cs-kind').value = s.kind || 'run_all';
+  csKindChanged();
+  document.querySelectorAll('.sched-day').forEach(cb => cb.checked = (s.days || []).includes(parseInt(cb.value)));
+  if (s.kind === 'scenario') {
+    const sc = G.scenarios.find(x => x.name === s.scenario_name);
+    document.getElementById('cs-scenario').value = sc ? sc.id : '';
+    document.getElementById('cs-pc').value = s.worker_id || '';
+  } else if (s.kind === 'multi') {
+    const names = new Set(s.scenario_names || []);
+    document.querySelectorAll('.cs-multi-scen').forEach(cb => cb.checked = names.has(cb.value));
+    document.getElementById('cs-pc').value = s.worker_id || '';
+  }
+  document.getElementById('sched-form-title').textContent = `✏️ Edit Schedule — ${s.name}`;
+  document.getElementById('sched-form-btn').textContent = 'Save Changes';
+  document.getElementById('sched-form-cancel').classList.remove('hidden');
+  document.getElementById('sched-form-card').style.borderLeft = '3px solid #0078d4';
+  document.getElementById('sched-form-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelEditSched() {
+  EDIT_SCHED_ID = null;
+  document.getElementById('sched-name').value = '';
+  document.getElementById('sched-time').value = '00:00';
+  document.getElementById('cs-kind').value = 'run_all';
+  csKindChanged();
+  document.querySelectorAll('.sched-day').forEach(cb => cb.checked = false);
+  document.querySelectorAll('.cs-multi-scen').forEach(cb => cb.checked = false);
+  document.getElementById('cs-scenario').value = '';
+  document.getElementById('cs-pc').value = '';
+  document.getElementById('sched-form-title').textContent = '➕ New Cloud Schedule';
+  document.getElementById('sched-form-btn').textContent = 'Add Schedule';
+  document.getElementById('sched-form-cancel').classList.add('hidden');
+  document.getElementById('sched-form-card').style.borderLeft = '';
+}
+
 async function addSchedule() {
   const name = document.getElementById('sched-name').value.trim();
   const time = document.getElementById('sched-time').value;
@@ -1653,7 +1839,8 @@ async function addSchedule() {
   if (!days.length) return alert('Select at least one day of the week.');
   if (!time) return alert('Set a time.');
   const co = requireCompany(); if (!co) return;
-  const row = { name, kind, days, run_time: time, timezone: TZ, enabled: true, company: co };
+  const row = { name, kind, days, run_time: time, timezone: TZ, company: co,
+                scenario_name: null, scenario_names: null, worker_id: null };
   if (kind === 'scenario') {
     const scenId = document.getElementById('cs-scenario').value;
     if (!scenId) return alert('Select a scenario.');
@@ -1665,12 +1852,10 @@ async function addSchedule() {
     row.scenario_names = names;
     row.worker_id = document.getElementById('cs-pc').value || null;
   }
-  if (await act(sb.from('schedules').insert(row))) {
-    document.getElementById('sched-name').value = '';
-    document.getElementById('sched-time').value = '00:00';
-    document.querySelectorAll('.sched-day').forEach(cb => cb.checked = false);
-    document.querySelectorAll('.cs-multi-scen').forEach(cb => cb.checked = false);
-  }
+  const ok = EDIT_SCHED_ID
+    ? await act(sb.from('schedules').update(row).eq('id', EDIT_SCHED_ID))
+    : await act(sb.from('schedules').insert({ ...row, enabled: true }));
+  if (ok) cancelEditSched();
 }
 
 async function toggleSched(id, enabled) {
