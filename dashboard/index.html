@@ -70,6 +70,47 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
 .combo-empty { padding:.9rem .65rem; font-size:.8125rem; color:#9ca3af; text-align:center; }
 .combo-count { padding:.3rem .65rem .15rem; font-size:.6875rem; color:#9ca3af; text-transform:uppercase; letter-spacing:.03em; }
 
+/* Toast notifications (replace alert) */
+#toast-container {
+  position:fixed; bottom:20px; right:20px; z-index:100;
+  display:flex; flex-direction:column; gap:8px;
+  max-width:min(380px, calc(100vw - 40px));
+}
+.toast {
+  padding:.7rem 1rem; border-radius:8px; font-size:.8125rem; line-height:1.45;
+  color:#fff; background:#1f2937; box-shadow:0 8px 24px rgba(16,24,40,.22);
+  white-space:pre-line; cursor:pointer; animation:toast-in .25s ease-out both;
+}
+.toast-success { background:#15803d; }
+.toast-error   { background:#b91c1c; }
+.toast-out     { opacity:0; transform:translateY(6px); transition:all .25s; }
+@keyframes toast-in { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+
+/* Modal dialogs (replace confirm / prompt) */
+.modal-overlay {
+  position:fixed; inset:0; z-index:100; background:rgba(15,23,42,.45);
+  backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center; padding:1rem;
+}
+.modal-card {
+  background:#fff; border-radius:12px; box-shadow:0 20px 50px rgba(16,24,40,.3);
+  padding:1.4rem 1.5rem; width:100%; max-width:430px; animation:fade-in .18s ease-out both;
+}
+.modal-msg { font-size:.875rem; color:#1f2937; white-space:pre-line; line-height:1.5; }
+.modal-input { width:100%; margin-top:.9rem; padding:.5rem .75rem; font-size:.875rem; }
+.modal-actions { display:flex; justify-content:flex-end; gap:.6rem; margin-top:1.2rem; }
+.modal-cancel {
+  background:#fff; border:1px solid #d1d5db; color:#374151; border-radius:6px;
+  padding:.45rem 1rem; font-size:.8125rem; cursor:pointer; transition:background .15s;
+}
+.modal-cancel:hover { background:#f3f4f6; }
+.modal-ok {
+  background:#0078d4; border:none; color:#fff; border-radius:6px;
+  padding:.45rem 1.1rem; font-size:.8125rem; font-weight:500; cursor:pointer; transition:background .15s;
+}
+.modal-ok:hover { background:#106ebe; }
+.modal-danger { background:#dc2626; }
+.modal-danger:hover { background:#b91c1c; }
+
 ::-webkit-scrollbar { width:5px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:3px; }
@@ -941,6 +982,68 @@ function renderScan() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Custom dialogs — toast replaces alert(), modals replace
+//  confirm()/prompt() (native dialogs block browser automation)
+// ═══════════════════════════════════════════════════════════
+function toast(msg, type) {
+  const t = String(msg);
+  if (!type) type = /^(❌|Error|error)/i.test(t) ? 'error' : /^✅/.test(t) ? 'success' : 'info';
+  let cont = document.getElementById('toast-container');
+  if (!cont) {
+    cont = document.createElement('div');
+    cont.id = 'toast-container';
+    document.body.appendChild(cont);
+  }
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = t;
+  el.onclick = () => el.remove();
+  cont.appendChild(el);
+  setTimeout(() => { el.classList.add('toast-out'); setTimeout(() => el.remove(), 260); }, 4500);
+}
+window.alert = toast;
+
+function _modal(msg, { input = false, password = false, defaultValue = '' } = {}) {
+  return new Promise(resolve => {
+    const danger = !input && /delete|remove|stop|shut|kill/i.test(msg);
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-card">
+        <p class="modal-msg"></p>
+        ${input ? `<input class="modal-input" type="${password ? 'password' : 'text'}" spellcheck="false">` : ''}
+        <div class="modal-actions">
+          <button class="modal-cancel">Cancel</button>
+          <button class="modal-ok${danger ? ' modal-danger' : ''}">${danger ? 'Yes, continue' : input ? 'Save' : 'Confirm'}</button>
+        </div>
+      </div>`;
+    overlay.querySelector('.modal-msg').textContent = msg;
+    const inp = overlay.querySelector('.modal-input');
+    if (inp) inp.value = defaultValue || '';
+    const done = v => {
+      document.removeEventListener('keydown', onKey);
+      overlay.remove();
+      resolve(v);
+    };
+    const okVal = () => input ? (inp ? inp.value : '') : true;
+    const cancelVal = input ? null : false;
+    overlay.querySelector('.modal-cancel').onclick = () => done(cancelVal);
+    overlay.querySelector('.modal-ok').onclick = () => done(okVal());
+    overlay.addEventListener('mousedown', e => { if (e.target === overlay) done(cancelVal); });
+    const onKey = e => {
+      if (e.key === 'Escape') { e.preventDefault(); done(cancelVal); }
+      else if (e.key === 'Enter') { e.preventDefault(); done(okVal()); }
+    };
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+    (inp || overlay.querySelector('.modal-ok')).focus();
+    if (inp) inp.select();
+  });
+}
+const appConfirm = msg => _modal(msg);
+const appPrompt = (msg, defaultValue, opts) => _modal(msg, { input: true, defaultValue, ...(opts || {}) });
+
+// ═══════════════════════════════════════════════════════════
 //  Scenario combobox (searchable dropdown)
 // ═══════════════════════════════════════════════════════════
 const SCOMBO = { items: [], filtered: [], active: -1, open: false };
@@ -1105,7 +1208,7 @@ async function custFolderScan() {
   if (!folder) return alert('Enter a folder path.');
   if (!workerId) return alert('Select a PC.');
   const w = workerById(workerId);
-  if (!isOnline(w) && !confirm(`"${w.display_name || w.username}" is offline.\nThe scan will run when it comes back online. Continue?`)) return;
+  if (!isOnline(w) && !await appConfirm(`"${w.display_name || w.username}" is offline.\nThe scan will run when it comes back online. Continue?`)) return;
   const { data, error } = await sb.from('commands')
     .insert({ worker_id: workerId, type: 'scan', payload: { folder } }).select().single();
   if (error) return alert('Error: ' + error.message);
@@ -1236,7 +1339,7 @@ function renderWinStatus() {
 async function _winCommand(type, payload) {
   const w = selectedWinWorker();
   if (!w) return alert('Select a PC first.');
-  if (!isOnline(w) && !confirm(`"${w.display_name || w.username}" is offline.\nThe command will run when it comes back online. Continue?`)) return;
+  if (!isOnline(w) && !await appConfirm(`"${w.display_name || w.username}" is offline.\nThe command will run when it comes back online. Continue?`)) return;
   const { data, error } = await sb.from('commands')
     .insert({ worker_id: w.id, type, payload }).select().single();
   if (error) return alert('Error: ' + error.message);
@@ -1249,7 +1352,7 @@ async function winSchedRefresh() { await _winCommand('win_sched_list', {}); }
 async function _winCommandFor(workerId, type, payload) {
   const w = workerById(workerId);
   if (!w) return;
-  if (!isOnline(w) && !confirm(`"${w.display_name || w.username}" is offline.\nThe command will run when it comes back online. Continue?`)) return;
+  if (!isOnline(w) && !await appConfirm(`"${w.display_name || w.username}" is offline.\nThe command will run when it comes back online. Continue?`)) return;
   const { data, error } = await sb.from('commands')
     .insert({ worker_id: workerId, type, payload: payload || {} }).select().single();
   if (error) return alert('Error: ' + error.message);
@@ -1260,7 +1363,7 @@ async function _winCommandFor(workerId, type, payload) {
 async function winSchedRefreshFor(workerId) { await _winCommandFor(workerId, 'win_sched_list', {}); }
 
 async function winSchedDeleteFor(workerId, taskName) {
-  if (!confirm(`Delete Windows scheduled task "${taskName}"?`)) return;
+  if (!await appConfirm(`Delete Windows scheduled task "${taskName}"?`)) return;
   await _winCommandFor(workerId, 'win_sched_delete', { task_name: taskName });
 }
 
@@ -1333,7 +1436,7 @@ async function winSchedToggle(workerId, taskName, enable) {
 }
 
 async function winSchedDelete(taskName) {
-  if (!confirm(`Delete Windows scheduled task "${taskName}"?`)) return;
+  if (!await appConfirm(`Delete Windows scheduled task "${taskName}"?`)) return;
   await _winCommand('win_sched_delete', { task_name: taskName });
 }
 
@@ -1434,7 +1537,7 @@ function renderRelease() {
 async function updateAllWorkers() {
   const outdated = G.workers.filter(w => coOK(w.company) && workerOutdated(w));
   if (!outdated.length) return alert('All workers are already on the latest version.');
-  if (!confirm(`Send the update command to ${outdated.length} worker(s)?\nEach updates and restarts as soon as it is idle.`)) return;
+  if (!await appConfirm(`Send the update command to ${outdated.length} worker(s)?\nEach updates and restarts as soon as it is idle.`)) return;
   const { error } = await sb.from('commands')
     .insert(outdated.map(w => ({ worker_id: w.id, type: 'update' })));
   if (error) return alert('Error: ' + error.message);
@@ -1451,7 +1554,7 @@ async function publishRelease() {
   if (!file) return alert('Choose the RPA-Bot.exe file.');
   if (G.latestRelease && !verLess(G.latestRelease.version, version))
     return alert(`Version must be higher than the latest (${G.latestRelease.version}).`);
-  if (!confirm(`Publish v${version}? All workers will self-update within ~30 minutes.`)) return;
+  if (!await appConfirm(`Publish v${version}? All workers will self-update within ~30 minutes.`)) return;
 
   btn.disabled = true;
   status.className = 'text-xs mt-2 text-yellow-600';
@@ -1542,7 +1645,7 @@ async function addCompany() {
 
 async function editCompanyFolder(slug) {
   const cur = G.companies.find(c => c.slug === slug)?.scenarios_folder || '';
-  const folder = prompt('Default scenarios folder for this company\n(use {USERNAME} for the per-PC user):', cur);
+  const folder = await appPrompt('Default scenarios folder for this company\n(use {USERNAME} for the per-PC user):', cur);
   if (folder === null) return;
   await act(sb.from('companies').update({ scenarios_folder: folder.trim() || null }).eq('slug', slug));
 }
@@ -1575,7 +1678,7 @@ async function inviteStaff() {
 }
 
 async function changePassword() {
-  const p = prompt('New password (minimum 8 characters):');
+  const p = await appPrompt('New password (minimum 8 characters):', '', { password: true });
   if (!p) return;
   if (p.length < 8) return alert('Password must be at least 8 characters.');
   const { error } = await sb.auth.updateUser({ password: p });
@@ -1733,7 +1836,7 @@ async function stopTask(id) {
 }
 
 async function stopAll() {
-  if (!confirm('Stop all pending and running tasks in the latest batch?')) return;
+  if (!await appConfirm('Stop all pending and running tasks in the latest batch?')) return;
   const batchTasks = G.tasks.filter(t => t.batch_id);
   const latestId = batchTasks.length ? batchTasks[0].batch_id : null;
   if (!latestId) return;
@@ -1762,7 +1865,7 @@ async function clearFinished() {
 async function requestScan() {
   const w = firstOnlineWorker();
   if (!w) return alert('No worker PCs registered.\nPair at least one machine first.');
-  if (!isOnline(w) && !confirm(`No workers are online right now.\nSend the request anyway? It will run when a worker comes back online.`)) return;
+  if (!isOnline(w) && !await appConfirm(`No workers are online right now.\nSend the request anyway? It will run when a worker comes back online.`)) return;
   const { data, error } = await sb.from('commands')
     .insert({ worker_id: w.id, type: 'scan' }).select().single();
   if (error) return alert('Error: ' + error.message);
@@ -1786,7 +1889,7 @@ async function addScenario() {
 
 async function removeScenario(id) {
   const s = G.scenarios.find(s => s.id === id);
-  if (!s || !confirm(`Remove "${s.name}" from the library?`)) return;
+  if (!s || !await appConfirm(`Remove "${s.name}" from the library?`)) return;
   await act(sb.from('scenarios').delete().eq('id', id));
 }
 
@@ -1798,13 +1901,13 @@ async function toggleWorker(id, enabled) {
 async function sendWorkerCmd(id, type) {
   const w = workerById(id);
   const verb = type === 'shutdown' ? 'shut down' : type;
-  if (!confirm(`Send ${verb} to "${w.display_name || w.username}"?`)) return;
+  if (!await appConfirm(`Send ${verb} to "${w.display_name || w.username}"?`)) return;
   await act(sb.from('commands').insert({ worker_id: id, type }));
 }
 
 async function removeWorker(id) {
   const w = workerById(id);
-  if (!confirm(`Remove "${w.display_name || w.username}"?\nThis deletes the worker and its task history. Uninstall the exe on that PC too, or it will error on next start.`)) return;
+  if (!await appConfirm(`Remove "${w.display_name || w.username}"?\nThis deletes the worker and its task history. Uninstall the exe on that PC too, or it will error on next start.`)) return;
   await act(sb.from('workers').delete().eq('id', id));
 }
 
@@ -1903,7 +2006,7 @@ async function toggleSched(id, enabled) {
 }
 
 async function deleteSched(id) {
-  if (!confirm('Delete this schedule?')) return;
+  if (!await appConfirm('Delete this schedule?')) return;
   await act(sb.from('schedules').delete().eq('id', id));
 }
 
