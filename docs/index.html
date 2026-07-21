@@ -337,9 +337,15 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
     </div>
 
     <div class="card overflow-hidden">
-      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50 flex-wrap gap-2">
         <h2 class="text-sm font-semibold text-gray-700">Scenario Library</h2>
-        <span id="scenario-count" class="text-xs text-gray-400"></span>
+        <div class="flex items-center gap-3">
+          <button id="scen-batch-del" onclick="batchRemoveScenarios()" class="hidden text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 px-3 py-1 rounded cursor-pointer">🗑 Remove selected</button>
+          <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+            <input type="checkbox" id="scen-sel-all" onchange="scenSelAll(this.checked)" class="cursor-pointer">Select all
+          </label>
+          <span id="scenario-count" class="text-xs text-gray-400"></span>
+        </div>
       </div>
       <div id="scenario-list" class="divide-y divide-gray-100"></div>
       <div id="scenario-empty" class="py-10 text-center text-gray-400 text-sm hidden">No scenarios yet — use Fetch or add manually.</div>
@@ -925,6 +931,7 @@ function diffScenarios() {
       : `${esc(folderTplFor(s.company))}\\<span class="text-green-600">${esc(s.name)}.rks</span>`;
     return { key: s.id, html: `
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-5 py-3 hover:bg-gray-50 transition-colors group">
+        <input type="checkbox" class="scen-pick cursor-pointer flex-shrink-0" ${SCEN_SEL.has(s.id) ? 'checked' : ''} onchange="scenPick('${s.id}', this.checked)">
         <div class="w-7 h-7 rounded bg-blue-50 flex items-center justify-center flex-shrink-0 text-sm border border-blue-100">📄</div>
         <div class="flex-1 min-w-0">
           <p class="text-sm font-medium text-gray-900">${esc(s.name)} ${!G.myCompany && !G.viewCompany ? coBadge(s.company) : ''}</p>
@@ -938,6 +945,40 @@ function diffScenarios() {
         </div>
       </div>` };
   }));
+  renderScenSel();
+}
+
+// -- Batch selection --
+const SCEN_SEL = new Set();
+
+function scenPick(id, on) {
+  if (on) SCEN_SEL.add(id); else SCEN_SEL.delete(id);
+  renderScenSel();
+}
+
+function renderScenSel() {
+  const vis = G.scenarios.filter(s => coOK(s.company));
+  [...SCEN_SEL].forEach(id => { if (!vis.some(s => s.id === id)) SCEN_SEL.delete(id); });
+  const btn = document.getElementById('scen-batch-del');
+  btn.classList.toggle('hidden', !SCEN_SEL.size);
+  if (SCEN_SEL.size) btn.textContent = `🗑 Remove selected (${SCEN_SEL.size})`;
+  document.getElementById('scen-sel-all').checked = vis.length > 0 && SCEN_SEL.size === vis.length;
+}
+
+function scenSelAll(on) {
+  SCEN_SEL.clear();
+  if (on) G.scenarios.filter(s => coOK(s.company)).forEach(s => SCEN_SEL.add(s.id));
+  diffScenarios();
+}
+
+async function batchRemoveScenarios() {
+  const ids = [...SCEN_SEL];
+  if (!ids.length) return;
+  if (!await appConfirm(`Remove ${ids.length} scenario(s) from the library?\nThis does not delete the .rks files — only the library entries.`)) return;
+  if (await act(sb.from('scenarios').delete().in('id', ids))) {
+    SCEN_SEL.clear();
+    toast(`✅ Removed ${ids.length} scenario(s) from the library`);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1423,11 +1464,11 @@ function renderWinTasks() {
             <p class="text-xs text-gray-400 mt-0.5">Next: ${esc(t.next_run || '—')} · Last: ${esc(t.last_run || 'never')}${t.last_result ? ' (result ' + esc(t.last_result) + ')' : ''}</p>
           </div>
           <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded border ${t.status === 'Running' ? 'bg-blue-50 text-blue-700 border-blue-200' : t.status === 'Disabled' ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-gray-50 text-gray-500 border-gray-200'}">${esc(t.status || '?')}</span>
-          ${t.is_ours ? `<div class="flex gap-2 flex-shrink-0">
+          <div class="flex gap-2 flex-shrink-0 items-center">
             <button onclick="winSchedToggle('${w.id}','${esc(t.task_name)}', ${t.status === 'Disabled'})" class="text-xs px-2 py-1 rounded border cursor-pointer ${t.status === 'Disabled' ? 'text-green-600 border-green-200 bg-green-50' : 'text-orange-600 border-orange-200 bg-orange-50'}">${t.status === 'Disabled' ? 'Enable' : 'Disable'}</button>
-            <button onclick="winSchedEdit('${t.id}')" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 px-2 py-1 rounded cursor-pointer">✏️ Edit</button>
-            <button onclick="winSchedDeleteFor('${w.id}','${esc(t.task_name)}')" class="text-xs text-red-500 hover:text-red-700 px-1 cursor-pointer">Delete</button>
-          </div>` : '<span class="text-xs text-gray-300 flex-shrink-0">read-only</span>'}
+            ${t.is_ours ? `<button onclick="winSchedEdit('${t.id}')" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 px-2 py-1 rounded cursor-pointer">✏️ Edit</button>` : '<span class="text-xs text-gray-300">external</span>'}
+            <button onclick="winSchedDeleteFor('${w.id}','${esc(t.task_name)}', ${t.is_ours})" class="text-xs text-red-500 hover:text-red-700 px-1 cursor-pointer">Delete</button>
+          </div>
         </div>` });
     }
   }
@@ -1477,8 +1518,9 @@ async function _winCommandFor(workerId, type, payload) {
 
 async function winSchedRefreshFor(workerId) { await _winCommandFor(workerId, 'win_sched_list', {}); }
 
-async function winSchedDeleteFor(workerId, taskName) {
-  if (!await appConfirm(`Delete Windows scheduled task "${taskName}"?`)) return;
+async function winSchedDeleteFor(workerId, taskName, isOurs) {
+  const warn = isOurs ? '' : '\n⚠ This is an external task (not created by this dashboard) — deleting it removes it from Windows Task Scheduler on that PC permanently.';
+  if (!await appConfirm(`Delete Windows scheduled task "${taskName}"?${warn}`)) return;
   await _winCommandFor(workerId, 'win_sched_delete', { task_name: taskName });
 }
 

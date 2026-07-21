@@ -109,9 +109,16 @@ def _guard_ours(task_name: str, verb: str):
         raise ValueError(f"Refusing to {verb} non-{OURS_PREFIX} task: {task_name}")
 
 
+def _guard_not_system(task_name: str, verb: str):
+    """Any listed (Keyence-related) task may be touched — but never Microsoft's."""
+    if task_name.lstrip("\\").lower().startswith("microsoft\\"):
+        raise ValueError(f"Refusing to {verb} a Microsoft system task: {task_name}")
+
+
 def delete_task(task_name: str):
-    """Delete one of OUR tasks only — guard against touching system tasks."""
-    _guard_ours(task_name, "delete")
+    """Delete a scheduled task (ours or an external Keyence one) —
+    Microsoft system tasks stay off-limits."""
+    _guard_not_system(task_name, "delete")
     r = _schtasks(["/delete", "/tn", task_name, "/f"])
     if r.returncode != 0:
         _fail("/delete", r)
@@ -127,8 +134,8 @@ def update_task(task_name: str, name: str, scenario: str,
 
 
 def toggle_task(task_name: str, enable: bool):
-    """Enable/disable one of OUR tasks."""
-    _guard_ours(task_name, "toggle")
+    """Enable/disable a scheduled task (ours or an external Keyence one)."""
+    _guard_not_system(task_name, "toggle")
     r = _schtasks(["/change", "/tn", task_name, "/enable" if enable else "/disable"])
     if r.returncode != 0:
         _fail("/change", r)
