@@ -728,6 +728,8 @@ function diffPCCards() {
           <span class="w-2.5 h-2.5 rounded-full ${dot} flex-shrink-0"></span>
         </div>
         <p class="text-xs truncate ${textCls} mb-1.5">${esc(label)}</p>
+        ${online && w.license_status === 'error' ? `<p class="text-xs text-red-600 mb-1.5" title="${esc(w.license_error || '')}">🛑 License: ${esc(w.license_error || 'verification failed')}</p>`
+        : online && w.license_status === 'warning' ? `<p class="text-xs text-amber-600 mb-1.5" title="${esc(w.license_error || '')}">⚠ License: ${esc(w.license_error || 'verification due')}</p>` : ''}
         ${isRunning ? `<div class="h-1 rounded-full bg-gray-200 overflow-hidden">
           <div class="h-full w-1/3 rounded-full bar-run" style="background:#0078d4"></div></div>` : ''}
         <p class="text-xs text-gray-300 mt-1.5">Last seen ${seen}${w.app_version ? ' · v' + esc(w.app_version) : ''}</p>

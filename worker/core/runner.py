@@ -248,10 +248,22 @@ class Runner:
         exit_code = proc.returncode
         ok = exit_code == 0
         logs.add("✅ Scenario completed" if ok else f"❌ Scenario failed (exit {exit_code})")
+        err = None if ok else f"RkScenarioManager exited with code {exit_code}"
+        if not ok:
+            # A failed license verification blocks all runs — name the real cause
+            try:
+                from . import license
+                lic = license.health(force=True)
+                if lic["status"] in ("error", "warning") and lic.get("error"):
+                    logs.add(f"[Keyence license] {lic['error']}")
+                    if lic["status"] == "error":
+                        err = f"License verification failed: {lic['error']}"
+            except Exception:
+                pass
         self.cloud.update_task(task_id, {
             "status": "success" if ok else "failed",
             "exit_code": exit_code,
-            "error": None if ok else f"RkScenarioManager exited with code {exit_code}",
+            "error": err,
             "finished_at": utcnow(),
         })
         log.info("Task %s → %s (exit %s)", task_id, "success" if ok else "failed", exit_code)

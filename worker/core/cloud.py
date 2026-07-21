@@ -101,16 +101,25 @@ class Cloud:
         os._exit(1)
 
     # ── workers ─────────────────────────────────────────────
-    def heartbeat(self, status: str, rk: dict, app_version: str):
+    def heartbeat(self, status: str, rk: dict, app_version: str,
+                  lic: dict | None = None):
+        fields = {
+            "last_seen": utcnow(),
+            "status": status,
+            "rk_open": rk.get("open", False),
+            "rk_running": rk.get("running", False),
+            "rk_scenario": rk.get("scenario"),
+            "app_version": app_version,
+        }
+        if lic and lic.get("status") != "unknown":
+            fields.update({
+                "license_status": lic["status"],
+                "license_last_verified": lic.get("last_verified"),
+                "license_error": lic.get("error"),
+            })
         self._safe(
-            lambda: self.client.table("workers").update({
-                "last_seen": utcnow(),
-                "status": status,
-                "rk_open": rk.get("open", False),
-                "rk_running": rk.get("running", False),
-                "rk_scenario": rk.get("scenario"),
-                "app_version": app_version,
-            }).eq("id", self.cfg.worker_id).execute(),
+            lambda: self.client.table("workers").update(fields)
+                .eq("id", self.cfg.worker_id).execute(),
             "heartbeat",
         )
 

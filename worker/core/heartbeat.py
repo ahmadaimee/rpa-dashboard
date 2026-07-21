@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 
+from . import license
 from .cloud import Cloud, utcnow
 from .runner import Runner
 from .rkdetect import RkMonitor
@@ -92,12 +93,14 @@ def start(cloud: Cloud, runner: Runner, app_version: str) -> threading.Thread:
         while True:
             try:
                 rk = monitor.sample()
+                lic = license.health()   # cached — rescans every 5 min
                 status = "running" if (runner.current_task_id or rk["running"]) else "idle"
-                state = (status, rk["running"], rk["open"], rk["scenario"])
+                state = (status, rk["running"], rk["open"], rk["scenario"],
+                         lic["status"], lic["error"])
                 # Push immediately on any change; otherwise stamp every 10 s
                 if (rk["event"] or state != last_state
                         or time.monotonic() - last_push >= HEARTBEAT_INTERVAL):
-                    cloud.heartbeat(status, rk, app_version)
+                    cloud.heartbeat(status, rk, app_version, lic)
                     last_push = time.monotonic()
                     last_state = state
                 _handle_external(cloud, runner, rk)
