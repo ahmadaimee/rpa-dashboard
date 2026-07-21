@@ -70,6 +70,17 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
 .combo-empty { padding:.9rem .65rem; font-size:.8125rem; color:#9ca3af; text-align:center; }
 .combo-count { padding:.3rem .65rem .15rem; font-size:.6875rem; color:#9ca3af; text-transform:uppercase; letter-spacing:.03em; }
 
+/* Generic searchable select (enhanceSelect) */
+.sel-combo { position:relative; }
+.sel-combo-input { padding-right:1.7rem !important; cursor:pointer; }
+.sel-combo-chev {
+  position:absolute; right:.6rem; top:50%; transform:translateY(-50%);
+  color:#9ca3af; font-size:.7rem; pointer-events:none; transition:transform .15s;
+}
+.sel-combo-open .sel-combo-chev { transform:translateY(-50%) rotate(180deg); }
+.sel-combo input.text-xs { width:7.5rem; }
+.sel-combo .combo-panel { min-width:100%; width:max-content; max-width:280px; }
+
 /* Toast notifications (replace alert) */
 #toast-container {
   position:fixed; bottom:20px; right:20px; z-index:100;
@@ -1154,6 +1165,110 @@ document.addEventListener('mousedown', e => {
   const combo = document.getElementById('scen-combo');
   if (combo && !combo.contains(e.target)) scenComboClose();
 });
+
+// ═══════════════════════════════════════════════════════════
+//  Generic searchable select — wraps a native <select> in a
+//  type-to-filter combobox. The native element stays in the DOM
+//  (hidden), so all existing .value reads/writes and onchange
+//  handlers keep working untouched.
+// ═══════════════════════════════════════════════════════════
+function enhanceSelect(sel) {
+  if (!sel || sel._combo) return;
+  sel._combo = true;
+  const wrap = document.createElement('div');
+  wrap.className = 'sel-combo';
+  sel.parentNode.insertBefore(wrap, sel);
+  wrap.appendChild(sel);
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.autocomplete = 'off'; inp.spellcheck = false;
+  inp.className = sel.className + ' sel-combo-input';
+  inp.placeholder = 'Search…';
+  const chev = document.createElement('span');
+  chev.className = 'sel-combo-chev'; chev.textContent = '▾';
+  const panel = document.createElement('div');
+  panel.className = 'combo-panel hidden';
+  wrap.append(inp, chev, panel);
+  sel.style.display = 'none';
+
+  let open = false, active = -1, filtered = [];
+  const opts = () => [...sel.options].map(o => ({ value: o.value, label: o.textContent }));
+  const curLabel = () => { const o = sel.options[sel.selectedIndex]; return o ? o.textContent : ''; };
+  const syncInput = () => { if (document.activeElement !== inp) inp.value = curLabel(); };
+
+  function render(q) {
+    const ql = (q || '').toLowerCase();
+    filtered = ql ? opts().filter(o => o.label.toLowerCase().includes(ql)) : opts();
+    const hi = lbl => {
+      if (!ql) return esc(lbl);
+      const i = lbl.toLowerCase().indexOf(ql);
+      return esc(lbl.slice(0, i)) + '<mark>' + esc(lbl.slice(i, i + q.length)) + '</mark>' + esc(lbl.slice(i + q.length));
+    };
+    panel.innerHTML = filtered.length
+      ? filtered.map((o, i) => `
+          <div class="combo-item${o.value === sel.value ? ' combo-selected' : ''}${i === active ? ' combo-active' : ''}" data-i="${i}">
+            <span class="truncate">${hi(o.label)}</span>
+            ${o.value === sel.value ? '<span class="ml-auto">✓</span>' : ''}
+          </div>`).join('')
+      : `<div class="combo-empty">No match${ql ? ` for “${esc(q)}”` : ''}</div>`;
+    panel.querySelectorAll('.combo-item').forEach(el =>
+      el.onmousedown = ev => { ev.preventDefault(); pick(parseInt(el.dataset.i)); });
+    panel.classList.remove('hidden');
+  }
+  function openPanel() {
+    open = true; active = -1;
+    wrap.classList.add('sel-combo-open');
+    inp.select();
+    render('');
+  }
+  function close(revert = true) {
+    if (!open) return;
+    open = false; active = -1;
+    wrap.classList.remove('sel-combo-open');
+    panel.classList.add('hidden');
+    if (revert) inp.value = curLabel();
+  }
+  function pick(i) {
+    const o = filtered[i];
+    if (!o) return;
+    sel.value = o.value;
+    sel.dispatchEvent(new Event('change'));
+    inp.value = o.label;
+    close(false);
+  }
+  inp.onfocus = openPanel;
+  inp.onclick = () => { if (!open) openPanel(); };
+  inp.oninput = () => { active = -1; render(inp.value.trim()); };
+  inp.onkeydown = e => {
+    if (e.key === 'Escape') { close(); inp.blur(); return; }
+    if (!open && (e.key === 'ArrowDown' || e.key === 'Enter')) { openPanel(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!filtered.length) return;
+      active = e.key === 'ArrowDown' ? (active + 1) % filtered.length
+                                     : (active - 1 + filtered.length) % filtered.length;
+      render(inp.value.trim());
+      const el = panel.querySelector('.combo-active');
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      pick(active >= 0 ? active : 0);
+    } else if (e.key === 'Tab') close();
+  };
+  document.addEventListener('mousedown', e => { if (!wrap.contains(e.target)) close(); });
+
+  // Keep the input label in sync when code rewrites options or sets .value
+  new MutationObserver(() => { syncInput(); if (open) render(inp.value.trim()); })
+    .observe(sel, { childList: true, subtree: true });
+  const desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  Object.defineProperty(sel, 'value', {
+    get() { return desc.get.call(sel); },
+    set(v) { desc.set.call(sel, v); syncInput(); },
+  });
+  syncInput();
+}
+
+['sel-pc', 'cust-pc', 'win-sel-pc', 'win-scenario', 'cs-kind', 'cs-scenario', 'cs-pc', 'filter-status']
+  .forEach(id => enhanceSelect(document.getElementById(id)));
 
 // ═══════════════════════════════════════════════════════════
 //  Selects / Settings / Schedules / Logs
