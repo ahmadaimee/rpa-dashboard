@@ -352,3 +352,17 @@ class Cloud:
                     .upsert(rows, on_conflict="company,name").execute(),
                 "upsert_scenarios",
             )
+
+    def delete_scenarios(self, names: list[str]):
+        """Remove library rows by name (company-scoped) — used when a scan
+        finds a scenario only inside an Archive folder."""
+        if not names:
+            return
+        company = self.my_company()
+
+        def _run():
+            q = self.client.table("scenarios").delete().in_("name", names)
+            q = q.eq("company", company) if company else q.is_("company", "null")
+            return q.execute()
+
+        self._safe(_run, "delete_scenarios")

@@ -44,10 +44,12 @@ def scan(cloud: Cloud, cfg, folder: str | None = None) -> dict:
     files = sorted(Path(resolved).rglob("*.rks"),
                    key=lambda p: (len(p.relative_to(resolved).parts), str(p).lower()))
     rows, names, seen = [], [], set()
+    archived: dict[str, str] = {}   # lower-stem -> original stem
     for p in files:
         rel_parts = p.relative_to(resolved).parts[:-1]
         if any(d.lower() in ARCHIVE_DIRS for d in rel_parts):
             log.info("Scan: archived scenario skipped: %s", p)
+            archived.setdefault(p.stem.lower(), p.stem)
             continue
         if p.stem.lower() in seen:
             log.info("Scan: duplicate scenario name skipped: %s", p)
@@ -64,5 +66,12 @@ def scan(cloud: Cloud, cfg, folder: str | None = None) -> dict:
             rows.append({"name": p.stem})
 
     cloud.upsert_scenarios(rows)
+    # Names that now exist ONLY inside an archive folder → drop from library
+    stale = [nm for low, nm in archived.items() if low not in seen]
+    if stale:
+        cloud.delete_scenarios(stale)
+        log.info("Scan: %d archived scenario(s) removed from library: %s",
+                 len(stale), ", ".join(stale))
     log.info("Scan: %d scenario(s) reported from %s", len(names), resolved)
-    return {"error": None, "found": names, "total": len(names), "folder": resolved}
+    return {"error": None, "found": names, "total": len(names),
+            "removed": len(stale), "folder": resolved}

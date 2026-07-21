@@ -921,7 +921,7 @@ function renderScan() {
     result.className = 'mt-4 rounded px-4 py-3 text-sm bg-green-50 border border-green-200 text-green-800';
     result.innerHTML = `
       <div class="flex items-center justify-between flex-wrap gap-2">
-        <p class="font-semibold">✅ Sync complete — ${r.total ?? 0} file${(r.total ?? 0) !== 1 ? 's' : ''} in folder</p>
+        <p class="font-semibold">✅ Sync complete — ${r.total ?? 0} file${(r.total ?? 0) !== 1 ? 's' : ''} in folder${r.removed ? ` · ${r.removed} archived removed from library` : ''}</p>
         <button onclick="G.scanCmd=null;renderScan()" class="text-xs text-gray-400 hover:text-gray-600 cursor-pointer">Dismiss</button>
       </div>`;
     result.classList.remove('hidden');
@@ -1205,7 +1205,7 @@ function renderWinTasks() {
           <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded border ${t.status === 'Running' ? 'bg-blue-50 text-blue-700 border-blue-200' : t.status === 'Disabled' ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-gray-50 text-gray-500 border-gray-200'}">${esc(t.status || '?')}</span>
           ${t.is_ours ? `<div class="flex gap-2 flex-shrink-0">
             <button onclick="winSchedToggle('${w.id}','${esc(t.task_name)}', ${t.status === 'Disabled'})" class="text-xs px-2 py-1 rounded border cursor-pointer ${t.status === 'Disabled' ? 'text-green-600 border-green-200 bg-green-50' : 'text-orange-600 border-orange-200 bg-orange-50'}">${t.status === 'Disabled' ? 'Enable' : 'Disable'}</button>
-            <button onclick="winSchedEdit('${w.id}','${esc(t.task_name)}')" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 px-2 py-1 rounded cursor-pointer">Edit</button>
+            <button onclick="winSchedEdit('${t.id}')" class="text-xs text-blue-600 border border-blue-200 bg-blue-50 px-2 py-1 rounded cursor-pointer">✏️ Edit</button>
             <button onclick="winSchedDeleteFor('${w.id}','${esc(t.task_name)}')" class="text-xs text-red-500 hover:text-red-700 px-1 cursor-pointer">Delete</button>
           </div>` : '<span class="text-xs text-gray-300 flex-shrink-0">read-only</span>'}
         </div>` });
@@ -1285,12 +1285,37 @@ async function winSchedCreate() {
   document.querySelectorAll('.win-day').forEach(cb => cb.checked = false);
 }
 
-function winSchedEdit(workerId, taskName) {
-  winEditing = { workerId, taskName };
-  document.getElementById('win-sel-pc').value = workerId;
+function winSchedEdit(taskId) {
+  const t = G.winTasks.find(x => x.id === taskId);
+  if (!t) return;
+  winEditing = { workerId: t.worker_id, taskName: t.task_name };
+  document.getElementById('win-sel-pc').value = t.worker_id;
   document.getElementById('win-name').value =
-    taskName.replace(/^\\?RPA-Bot-Sched-/, '').replace(/^\\?OrchardRPA-/, '');
-  document.getElementById('win-create-btn').textContent = `Update "${taskName.replace(/^\\/, '')}"`;
+    t.task_name.replace(/^\\?RPA-Bot-Sched-/, '').replace(/^\\?OrchardRPA-/, '');
+  // Prefill scenario from the task's command line: --enqueue "Name"
+  const m = (t.task_to_run || '').match(/--enqueue\s+"([^"]+)"/) ||
+            (t.task_to_run || '').match(/--enqueue\s+(\S+)/);
+  if (m) {
+    const sc = G.scenarios.find(s => s.name === m[1]);
+    if (sc) document.getElementById('win-scenario').value = sc.id;
+  }
+  // Prefill days from the schedule string (e.g. "Weekly MON, WED 07:00:00")
+  const DAY_IDX = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
+  const found = new Set(((t.schedule || '').toUpperCase()
+    .match(/\b(SUN|MON|TUE|WED|THU|FRI|SAT)[A-Z]*\b/g) || [])
+    .map(tok => DAY_IDX[tok.slice(0, 3)]));
+  if (found.size)
+    document.querySelectorAll('.win-day').forEach(cb => cb.checked = found.has(parseInt(cb.value)));
+  // Prefill time (handles "07:00:00" and "7:00:00 AM" formats)
+  const tm = (t.schedule || '').match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/i);
+  if (tm) {
+    let h = parseInt(tm[1]);
+    const ap = (tm[3] || '').toUpperCase();
+    if (ap === 'PM' && h < 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    document.getElementById('win-time').value = String(h).padStart(2, '0') + ':' + tm[2];
+  }
+  document.getElementById('win-create-btn').textContent = `Update "${t.task_name.replace(/^\\/, '')}"`;
   document.getElementById('win-cancel-edit').classList.remove('hidden');
   document.getElementById('win-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
