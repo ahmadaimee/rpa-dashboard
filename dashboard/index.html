@@ -189,7 +189,8 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
             <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">🔍</span>
             <input type="text" id="scen-combo-input" class="w-full pl-9 pr-16 py-2 text-sm" placeholder="Search & select scenario…"
               autocomplete="off" spellcheck="false"
-              onfocus="scenComboOpen()" oninput="scenComboFilter()" onkeydown="scenComboKey(event)">
+              onfocus="scenComboOpen()" onclick="if(!SCOMBO.open)scenComboOpen()"
+              oninput="scenComboFilter()" onkeydown="scenComboKey(event)">
             <button type="button" id="scen-combo-clear" onclick="scenComboClear()"
               class="hidden absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm cursor-pointer leading-none px-1">✕</button>
             <span id="scen-combo-chevron" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none transition-transform duration-150">▾</span>
@@ -467,7 +468,8 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
         shortly after start and every ~30 minutes, verifies the file hash, and updates itself automatically
         (never mid-scenario). Use a worker's <strong>Update</strong> button below to force it immediately.
       </p>
-      <p class="text-xs text-gray-600 mb-3">Latest published version: <span id="latest-release" class="font-mono text-purple-700">none yet</span></p>
+      <p class="text-xs text-gray-600 mb-3">Latest published version: <span id="latest-release" class="font-mono text-purple-700">none yet</span>
+        <button onclick="updateAllWorkers()" id="update-all-btn" class="hidden ml-3 text-xs text-purple-600 border border-purple-200 bg-purple-50 hover:bg-purple-100 px-3 py-1 rounded cursor-pointer">⬆ Update All Workers</button></p>
       <div class="flex flex-wrap gap-3 items-end">
         <div class="w-32">
           <label class="block text-xs text-gray-500 mb-1">Version</label>
@@ -1424,6 +1426,19 @@ function renderRelease() {
   el.textContent = G.latestRelease
     ? `v${G.latestRelease.version} (${new Date(G.latestRelease.released_at).toLocaleString()})`
     : 'none yet';
+  const btn = document.getElementById('update-all-btn');
+  if (btn) btn.classList.toggle('hidden',
+    !G.workers.some(w => coOK(w.company) && workerOutdated(w)));
+}
+
+async function updateAllWorkers() {
+  const outdated = G.workers.filter(w => coOK(w.company) && workerOutdated(w));
+  if (!outdated.length) return alert('All workers are already on the latest version.');
+  if (!confirm(`Send the update command to ${outdated.length} worker(s)?\nEach updates and restarts as soon as it is idle.`)) return;
+  const { error } = await sb.from('commands')
+    .insert(outdated.map(w => ({ worker_id: w.id, type: 'update' })));
+  if (error) return alert('Error: ' + error.message);
+  alert(`Update command sent to ${outdated.length} worker(s).`);
 }
 
 async function publishRelease() {
