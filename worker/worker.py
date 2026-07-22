@@ -100,6 +100,8 @@ def parse_args():
     p.add_argument("--background", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--uninstall", action="store_true", help="Remove autostart and stop the worker")
     p.add_argument("--quiet", action="store_true", help="No prompts (used by the setup uninstaller)")
+    p.add_argument("--run-script", metavar="PATH", dest="run_script",
+                   help=argparse.SUPPRESS)   # internal: run a bundled payload script
     p.add_argument("--enqueue", metavar="SCENARIO",
                    help="Insert a cloud task for this PC and exit "
                         "(used by dashboard-created Windows scheduled tasks)")
@@ -178,6 +180,22 @@ def worker_loop(cfg: cfgmod.Config):
 
 def main():
     args = parse_args()
+
+    # ── Payload-script mode (child process of a Weekly Pass task) ──
+    # A frozen build has no python.exe, so we re-invoke ourselves and run
+    # the script through runpy inside our own embedded interpreter.
+    if args.run_script:
+        import runpy
+        sys.argv = [args.run_script]
+        try:
+            runpy.run_path(args.run_script, run_name="__main__")
+        except SystemExit as e:
+            raise SystemExit(e.code if isinstance(e.code, int) else (0 if e.code is None else 1))
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            raise SystemExit(1)
+        return
 
     if args.uninstall:
         _setup_logging(to_file=False)

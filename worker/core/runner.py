@@ -14,6 +14,7 @@ import threading
 import time
 from datetime import datetime
 
+from . import payload
 from .cloud import Cloud, utcnow
 
 try:
@@ -130,7 +131,10 @@ class Runner:
         self._stop_requested.clear()
         logs = LogBatcher(self.cloud, task_id)
         try:
-            self._run_inner(task, task_id, logs)
+            if task.get("source") in payload.SCRIPTS:
+                self._run_script(task, task_id, logs)
+            else:
+                self._run_inner(task, task_id, logs)
         finally:
             logs.flush()
             self.current_task_id = None
@@ -148,6 +152,79 @@ class Runner:
         self.cloud.update_task(task_id, {
             "status": "failed", "error": msg, "finished_at": utcnow(),
         })
+
+    # ── bundled maintenance script (Weekly Pass) ─────────────
+    def _run_script(self, task: dict, task_id: str, logs: LogBatcher):
+        """Run a script shipped inside the exe (payloads/) — no Keyence involved."""
+        source = task["source"]
+        path = payload.script_for(source)
+        if not path:
+            return self._fail(task_id, logs,
+                              f"Bundled script for '{source}' missing from this build")
+
+        self.cloud.update_task(task_id, {"resolved_path": path})
+        logs.add(f"▶ {task.get('scenario_name') or source} on {self.cfg.username}")
+        logs.add(f"   Script: {path}")
+
+        try:
+            proc = subprocess.Popen(
+                payload.command_for(path),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                env=payload.run_env(), cwd=os.path.dirname(path),
+                creationflags=CREATE_NO_WINDOW,
+            )
+        except Exception as e:
+            return self._fail(task_id, logs, f"Failed to start script: {e}")
+
+        stopped = threading.Event()
+
+        def watch_stop():
+            while not stopped.is_set():
+                if self._stop_requested.wait(timeout=1):
+                    if proc.poll() is None:
+                        if platform.system() == "Windows":
+                            subprocess.run(
+                                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                                capture_output=True, creationflags=CREATE_NO_WINDOW,
+                            )
+                        else:
+                            proc.terminate()
+                    logs.add("⛔ Stopped by user")
+                    self.cloud.update_task(task_id, {
+                        "status": "stopped", "finished_at": utcnow(),
+                    })
+                    stopped.set()
+                    return
+
+        stop_thread = threading.Thread(target=watch_stop, daemon=True)
+        stop_thread.start()
+
+        try:
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if line:
+                    logs.add(line)
+        except Exception:
+            pass
+        proc.wait()
+        stopped.set()
+
+        if self._stop_requested.is_set():
+            stop_thread.join(timeout=15)
+            return
+
+        exit_code = proc.returncode
+        ok = exit_code == 0
+        logs.add("✅ Completed" if ok else f"❌ Failed (exit {exit_code})")
+        self.cloud.update_task(task_id, {
+            "status": "success" if ok else "failed",
+            "exit_code": exit_code,
+            "error": None if ok else f"Script exited with code {exit_code}",
+            "finished_at": utcnow(),
+        })
+        log.info("Script task %s → %s (exit %s)", task_id,
+                 "success" if ok else "failed", exit_code)
 
     def _run_inner(self, task: dict, task_id: str, logs: LogBatcher):
         rks = self.resolve_path(task)

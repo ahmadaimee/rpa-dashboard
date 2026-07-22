@@ -11,6 +11,7 @@ pip install -r requirements.txt
 pyinstaller --onefile --name RPA-Bot --clean --noconfirm `
   --icon assets\icon.ico `
   --add-data "assets\icon.png;assets" `
+  --add-data "payloads\firewall.py;payloads" `
   worker.py
 
 # Version for the installer from version.py

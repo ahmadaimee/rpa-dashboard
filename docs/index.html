@@ -411,6 +411,35 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
       <div id="schedule-empty" class="py-10 text-center text-gray-400 text-sm hidden">No schedules configured</div>
     </div>
 
+    <!-- Weekly Pass -->
+    <div class="card p-5 mb-4" style="border-left:3px solid #7c3aed;">
+      <div class="flex items-center justify-between flex-wrap gap-3 mb-1">
+        <h2 class="text-base font-semibold text-gray-900">🛡️ Weekly Pass</h2>
+        <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input id="wp-enabled" type="checkbox" onchange="saveWeeklyPass()" class="w-4 h-4 cursor-pointer">
+          <span class="text-gray-700 font-medium">Weekly Pass <span class="text-gray-400 font-normal">(company-wide)</span></span>
+        </label>
+      </div>
+      <p class="text-xs text-gray-500 mb-4">
+        Runs the built-in maintenance script on <strong class="text-gray-700">one PC at a time</strong> —
+        the next PC starts only after the previous one finishes. Each PC gets its turn roughly every
+        N days, and only while it is <strong class="text-gray-700">idle</strong> with no schedule due
+        within ±30 minutes. Progress and output show up in the Task Queue and Logs like any other run.
+      </p>
+      <div class="flex flex-wrap gap-3 items-end mb-4">
+        <div class="w-36">
+          <label class="block text-xs text-gray-500 mb-1">Every (days)</label>
+          <input id="wp-days" type="number" min="1" max="60" value="7" onchange="saveWeeklyPass()"
+            class="w-full px-3 py-2 text-sm">
+        </div>
+        <button onclick="weeklyPassRunAll()" class="btn-primary">▶ Run on all PCs now</button>
+        <button onclick="weeklyPassCancel()" id="wp-cancel"
+          class="hidden text-sm text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 px-4 py-2 rounded cursor-pointer">Cancel pass</button>
+        <span id="wp-status" class="text-xs text-gray-500"></span>
+      </div>
+      <div id="wp-list" class="divide-y divide-gray-100 border-t border-gray-100"></div>
+    </div>
+
     <!-- Windows Task Scheduler -->
     <div class="card p-5 mb-4" style="border-left:3px solid #16a34a;">
       <div class="flex items-center justify-between flex-wrap gap-3 mb-1">
@@ -585,7 +614,7 @@ const ONLINE_MS = 30_000;
 const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-let G = { workers:[], scenarios:[], tasks:[], schedules:[], codes:[], winTasks:[], companies:[],
+let G = { workers:[], scenarios:[], tasks:[], schedules:[], codes:[], winTasks:[], companies:[], wpTasks:[],
           latestRelease:null, scanCmd:null, winCmd:null, custCmd:null,
           myCompany:null, viewCompany: localStorage.getItem('viewCompany') || '' };
 
@@ -653,7 +682,7 @@ function setConn(up, label) {
 }
 
 async function fetchAll() {
-  const [w, s, t, sc, pc, wt, rel, co] = await Promise.all([
+  const [w, s, t, sc, pc, wt, rel, co, wp] = await Promise.all([
     sb.from('workers').select('*').order('username'),
     sb.from('scenarios').select('*').order('name'),
     sb.from('tasks').select('*').order('created_at', { ascending:false }).limit(300),
@@ -662,6 +691,8 @@ async function fetchAll() {
     sb.from('win_tasks').select('*').order('task_name'),
     sb.from('worker_releases').select('*').order('released_at', { ascending:false }).limit(1),
     sb.from('companies').select('*').order('name'),
+    sb.from('tasks').select('*').eq('source', 'weekly_pass')
+      .order('created_at', { ascending:false }).limit(200),
   ]);
   if (w.data)  G.workers   = w.data;
   if (s.data)  G.scenarios = s.data;
@@ -671,6 +702,7 @@ async function fetchAll() {
   if (wt.data) G.winTasks  = wt.data;
   if (rel.data) G.latestRelease = rel.data[0] || null;
   if (co.data) G.companies = co.data;
+  if (wp.data) G.wpTasks = wp.data;
   document.getElementById('last-sync').textContent = new Date().toLocaleTimeString();
 }
 
@@ -896,6 +928,7 @@ function diffTasks() {
             <p class="text-sm font-medium truncate text-gray-900">${esc(t.scenario_name)}
               ${t.source === 'external' ? '<span class="ml-1 text-xs font-normal text-purple-600 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5">on-PC</span>' : ''}
               ${t.source === 'win_schedule' ? '<span class="ml-1 text-xs font-normal text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">win-sched</span>' : ''}
+              ${t.source === 'weekly_pass' ? '<span class="ml-1 text-xs font-normal text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5">weekly pass</span>' : ''}
               ${t.source === 'schedule' ? '<span class="ml-1 text-xs font-normal text-blue-600 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">schedule</span>' : ''}</p>
             <p class="text-xs text-gray-400">${esc(workerName(t.worker_id))} · ${dt}${dur ? ' · ' + dur : ''}</p>
             ${t.error ? `<p class="text-xs text-red-500 mt-0.5 truncate">${esc(t.error)}</p>` : ''}
@@ -1932,6 +1965,115 @@ function renderAll() {
   renderWinTasks();
   renderRelease();
   renderCompanies();
+  renderWeeklyPass();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Weekly Pass — one maintenance script, one PC at a time
+// ═══════════════════════════════════════════════════════════
+function wpLast(workerId) {
+  return G.wpTasks.find(t => t.worker_id === workerId
+    && ['success','failed','stopped'].includes(t.status));
+}
+function wpActive(workerId) {
+  return G.wpTasks.find(t => t.worker_id === workerId
+    && ['pending','running'].includes(t.status));
+}
+
+function renderWeeklyPass() {
+  const co   = ctxCompany();
+  const comp = G.companies.find(c => c.slug === co);
+  const box  = document.getElementById('wp-list');
+  const cb   = document.getElementById('wp-enabled');
+  const days = document.getElementById('wp-days');
+  const stat = document.getElementById('wp-status');
+  if (!box) return;
+
+  if (!comp) {
+    cb.checked = false; cb.disabled = true; days.disabled = true;
+    stat.textContent = '';
+    document.getElementById('wp-cancel').classList.add('hidden');
+    box.innerHTML = '<p class="text-xs text-gray-400 py-4">Select a company in the sidebar to configure the Weekly Pass.</p>';
+    return;
+  }
+  cb.disabled = false; days.disabled = false;
+  if (document.activeElement !== cb)   cb.checked  = !!comp.weekly_pass_enabled;
+  if (document.activeElement !== days) days.value  = comp.weekly_pass_interval_days || 7;
+
+  const interval = Math.max(comp.weekly_pass_interval_days || 7, 1);
+  const forcing  = !!comp.weekly_pass_force_started;
+  const running  = G.wpTasks.find(t => t.company === co && ['pending','running'].includes(t.status));
+  document.getElementById('wp-cancel').classList.toggle('hidden', !forcing && !running);
+  stat.textContent = running
+    ? `In progress on ${workerName(running.worker_id)}${forcing ? ' — manual pass over all PCs' : ''}`
+    : (forcing ? 'Manual pass queued — waiting for an idle PC' : '');
+
+  const ws = G.workers.filter(w => w.company === co && w.enabled);
+  if (!ws.length) {
+    box.innerHTML = '<p class="text-xs text-gray-400 py-4">No PCs in this company yet.</p>';
+    return;
+  }
+  box.innerHTML = ws.map(w => {
+    const last = wpLast(w.id), act = wpActive(w.id);
+    const lastTs = last ? new Date(last.finished_at || last.created_at) : null;
+    const due = lastTs ? new Date(lastTs.getTime() + interval * 86400000) : null;
+    const badge = act
+      ? `<span class="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">${act.status === 'running' ? 'Running now' : 'Queued'}</span>`
+      : last
+        ? `<span class="text-xs ${last.status === 'success' ? 'text-green-700 bg-green-50 border-green-200' : 'text-red-700 bg-red-50 border-red-200'} border rounded px-1.5 py-0.5">${esc(last.status)}</span>`
+        : '<span class="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5">never run</span>';
+    const when = lastTs
+      ? `Last: ${lastTs.toLocaleString()} · Next due: ${due <= new Date() ? 'now' : due.toLocaleDateString()}`
+      : 'Never run — due on the next idle window';
+    return `
+      <div class="flex items-center justify-between gap-3 py-2.5 flex-wrap">
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-gray-900">
+            ${esc(w.display_name || w.username)}
+            <span class="ml-1">${badge}</span>
+            ${isOnline(w) ? '' : '<span class="text-xs text-gray-400 ml-1">offline</span>'}
+          </p>
+          <p class="text-xs text-gray-500">${esc(when)}</p>
+        </div>
+        <button onclick="weeklyPassRunOne('${w.id}')" ${act ? 'disabled' : ''}
+          class="text-xs ${act ? 'text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed' : 'text-purple-700 border-purple-200 bg-purple-50 hover:bg-purple-100 cursor-pointer'} border px-3 py-1.5 rounded">
+          ▶ Run on this PC
+        </button>
+      </div>`;
+  }).join('');
+}
+
+async function saveWeeklyPass() {
+  const co = requireCompany();
+  if (!co) return renderWeeklyPass();
+  const enabled = document.getElementById('wp-enabled').checked;
+  const days = parseInt(document.getElementById('wp-days').value, 10) || 7;
+  await act(sb.rpc('set_weekly_pass', {
+    p_company: co, p_enabled: enabled, p_interval: days,
+  }));
+}
+
+async function weeklyPassRunAll() {
+  const co = requireCompany();
+  if (!co) return;
+  const n = G.workers.filter(w => w.company === co && w.enabled).length;
+  if (!await appConfirm(`Run the Weekly Pass on all ${n} PC(s) of ${coName(co)}? `
+             + 'They run one at a time — each PC starts only after the previous one finishes, '
+             + 'and only while that PC is idle.')) return;
+  await act(sb.rpc('weekly_pass_run_all', { p_company: co }));
+}
+
+async function weeklyPassRunOne(workerId) {
+  if (!await appConfirm(`Run the Weekly Pass on ${workerName(workerId)} now?`)) return;
+  await act(sb.rpc('weekly_pass_run_one', { p_worker: workerId }));
+}
+
+async function weeklyPassCancel() {
+  const co = requireCompany();
+  if (!co) return;
+  if (!await appConfirm('Cancel the Weekly Pass? Queued PCs will be dropped '
+             + '(a run already in progress keeps going).')) return;
+  await act(sb.rpc('weekly_pass_cancel', { p_company: co }));
 }
 
 // ═══════════════════════════════════════════════════════════
