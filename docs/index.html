@@ -417,21 +417,18 @@ input:focus, select:focus { outline:none; border-color:#0078d4; box-shadow:0 0 0
         <h2 class="text-base font-semibold text-gray-900">🛡️ Weekly Pass</h2>
         <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
           <input id="wp-enabled" type="checkbox" onchange="saveWeeklyPass()" class="w-4 h-4 cursor-pointer">
-          <span class="text-gray-700 font-medium">Weekly Pass <span class="text-gray-400 font-normal">(company-wide)</span></span>
+          <span class="text-gray-700 font-medium">Weekly Pass <span class="text-gray-400 font-normal">(company-wide · every Sunday)</span></span>
         </label>
       </div>
       <p class="text-xs text-gray-500 mb-4">
-        Runs the built-in maintenance script on <strong class="text-gray-700">one PC at a time</strong> —
-        the next PC starts only after the previous one finishes. Each PC gets its turn roughly every
-        N days, and only while it is <strong class="text-gray-700">idle</strong> with no schedule due
-        within ±30 minutes. Progress and output show up in the Task Queue and Logs like any other run.
+        Runs the built-in maintenance script on <strong class="text-gray-700">every PC, one at a
+        time</strong> — the next PC starts only after the previous one finishes. Every PC becomes due
+        at the start of <strong class="text-gray-700">Sunday</strong> (America/New_York) and runs as
+        soon as it is <strong class="text-gray-700">idle</strong> with no schedule due within
+        ±30 minutes — so a PC that is busy or off on Sunday gets its turn as soon as it is free,
+        it never skips a week. Progress and output show up in the Task Queue and Logs like any other run.
       </p>
-      <div class="flex flex-wrap gap-3 items-end mb-4">
-        <div class="w-36">
-          <label class="block text-xs text-gray-500 mb-1">Every (days)</label>
-          <input id="wp-days" type="number" min="1" max="60" value="7" onchange="saveWeeklyPass()"
-            class="w-full px-3 py-2 text-sm">
-        </div>
+      <div class="flex flex-wrap gap-3 items-center mb-4">
         <button onclick="weeklyPassRunAll()" class="btn-primary">▶ Run on all PCs now</button>
         <button onclick="weeklyPassCancel()" id="wp-cancel"
           class="hidden text-sm text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 px-4 py-2 rounded cursor-pointer">Cancel pass</button>
@@ -613,6 +610,7 @@ const sb = window.supabase.createClient(
 const ONLINE_MS = 30_000;
 const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const WP_TZ = 'America/New_York';   // Weekly Pass week boundary (matches public.last_sunday())
 
 let G = { workers:[], scenarios:[], tasks:[], schedules:[], codes:[], winTasks:[], companies:[], wpTasks:[],
           latestRelease:null, scanCmd:null, winCmd:null, custCmd:null,
@@ -1980,28 +1978,36 @@ function wpActive(workerId) {
     && ['pending','running'].includes(t.status));
 }
 
+// Start of the most recent Sunday in the company timezone — matches the
+// server-side public.last_sunday() that decides which PCs are due.
+function wpLastSunday() {
+  const nowNY = new Date(new Date().toLocaleString('en-US', { timeZone: WP_TZ }));
+  const sun = new Date(nowNY);
+  sun.setDate(sun.getDate() - sun.getDay());
+  sun.setHours(0, 0, 0, 0);
+  return new Date(sun.getTime() + (Date.now() - nowNY.getTime()));
+}
+
 function renderWeeklyPass() {
   const co   = ctxCompany();
   const comp = G.companies.find(c => c.slug === co);
   const box  = document.getElementById('wp-list');
   const cb   = document.getElementById('wp-enabled');
-  const days = document.getElementById('wp-days');
   const stat = document.getElementById('wp-status');
   if (!box) return;
 
   if (!comp) {
-    cb.checked = false; cb.disabled = true; days.disabled = true;
+    cb.checked = false; cb.disabled = true;
     stat.textContent = '';
     document.getElementById('wp-cancel').classList.add('hidden');
     box.innerHTML = '<p class="text-xs text-gray-400 py-4">Select a company in the sidebar to configure the Weekly Pass.</p>';
     return;
   }
-  cb.disabled = false; days.disabled = false;
-  if (document.activeElement !== cb)   cb.checked  = !!comp.weekly_pass_enabled;
-  if (document.activeElement !== days) days.value  = comp.weekly_pass_interval_days || 7;
+  cb.disabled = false;
+  if (document.activeElement !== cb) cb.checked = !!comp.weekly_pass_enabled;
 
-  const interval = Math.max(comp.weekly_pass_interval_days || 7, 1);
-  const forcing  = !!comp.weekly_pass_force_started;
+  const since   = wpLastSunday();
+  const forcing = !!comp.weekly_pass_force_started;
   const running  = G.wpTasks.find(t => t.company === co && ['pending','running'].includes(t.status));
   document.getElementById('wp-cancel').classList.toggle('hidden', !forcing && !running);
   stat.textContent = running
@@ -2016,15 +2022,17 @@ function renderWeeklyPass() {
   box.innerHTML = ws.map(w => {
     const last = wpLast(w.id), act = wpActive(w.id);
     const lastTs = last ? new Date(last.finished_at || last.created_at) : null;
-    const due = lastTs ? new Date(lastTs.getTime() + interval * 86400000) : null;
+    const overdue = !lastTs || lastTs < since;
+    const nextSun = new Date(since.getTime() + 7 * 86400000);
     const badge = act
       ? `<span class="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">${act.status === 'running' ? 'Running now' : 'Queued'}</span>`
       : last
         ? `<span class="text-xs ${last.status === 'success' ? 'text-green-700 bg-green-50 border-green-200' : 'text-red-700 bg-red-50 border-red-200'} border rounded px-1.5 py-0.5">${esc(last.status)}</span>`
         : '<span class="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5">never run</span>';
     const when = lastTs
-      ? `Last: ${lastTs.toLocaleString()} · Next due: ${due <= new Date() ? 'now' : due.toLocaleDateString()}`
-      : 'Never run — due on the next idle window';
+      ? `Last: ${lastTs.toLocaleString()} · ${overdue ? 'Due now — waiting for an idle window'
+                                                     : 'Next: Sun ' + nextSun.toLocaleDateString()}`
+      : 'Never run — due now, waiting for an idle window';
     return `
       <div class="flex items-center justify-between gap-3 py-2.5 flex-wrap">
         <div class="min-w-0">
@@ -2047,10 +2055,7 @@ async function saveWeeklyPass() {
   const co = requireCompany();
   if (!co) return renderWeeklyPass();
   const enabled = document.getElementById('wp-enabled').checked;
-  const days = parseInt(document.getElementById('wp-days').value, 10) || 7;
-  await act(sb.rpc('set_weekly_pass', {
-    p_company: co, p_enabled: enabled, p_interval: days,
-  }));
+  await act(sb.rpc('set_weekly_pass', { p_company: co, p_enabled: enabled }));
 }
 
 async function weeklyPassRunAll() {

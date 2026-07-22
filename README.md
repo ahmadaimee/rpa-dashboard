@@ -78,7 +78,7 @@ dummy `.rks` files.
 | Live view | heartbeat every 10 s (`last_seen`, `rk_running`); online = seen < 30 s ago |
 | Logs | stdout batched (15 lines / 3 s, cap 500) into `task_logs`; 14-day retention |
 | Schedules | pg_cron runs `check_schedules()` every minute — fires with dashboards closed |
-| Weekly Pass | company-wide switch (Schedules tab). pg_cron `dispatch_weekly_pass()` every 5 min queues `source='weekly_pass'` on ONE due PC at a time; the worker runs the bundled `payloads/firewall.py` instead of a `.rks`. A PC is picked only while idle (online, `status='idle'`, Keyence not running, nothing queued) and no schedule fires within ±30 min. Manual: “Run on all PCs now” (sequential, ignores interval + quiet window) or “Run on this PC”. |
+| Weekly Pass | company-wide switch (Schedules tab). Every PC becomes due at the start of **Sunday** (America/New_York, `last_sunday()`); pg_cron `dispatch_weekly_pass()` every 5 min queues `source='weekly_pass'` on ONE due PC at a time — the worker runs the bundled `payloads/firewall.py` instead of a `.rks`. A PC is picked only while idle (online, `status='idle'`, Keyence not running, nothing queued) and no schedule fires within ±30 min, so a PC busy/off on Sunday gets its turn as soon as it frees up (never skips a week). Manual: “Run on all PCs now” (sequential, ignores the weekly boundary + quiet window) or “Run on this PC”. |
 | Stale tasks | pg_cron marks `running` tasks `failed` if their worker stopped heartbeating >10 min |
 | Security | Supabase Auth: admins = email/password; workers = per-device auth user (`app_metadata.role='worker'`) minted by the `register-device` edge function against a one-time pairing code. RLS confines each worker to its own rows. |
 
